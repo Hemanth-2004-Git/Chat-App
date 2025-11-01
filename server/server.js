@@ -1,0 +1,114 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+dotenv.config();
+import http from "http";
+import userrouter from "./routes/userroute.js";
+import { Server } from "socket.io";
+import { connectDB } from "./lib/db.js";
+import messagerouter from "./routes/messageroute.js";
+
+const app = express();
+const server = http.createServer(app);
+
+// Connect to database first
+await connectDB();
+
+const PORT = process.env.PORT || 5000;
+
+// CORS configuration
+app.use(cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true
+}));
+
+// Body parser middleware
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+    if (req.method === 'POST' || req.method === 'PUT') {
+        console.log('📦 Request body:', req.body);
+    }
+    next();
+});
+
+// Test route
+app.get("/api/test", (req, res) => {
+    res.json({ 
+        success: true, 
+        message: "Backend server is working!",
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get("/api/status", (req, res) => res.send("server is live"));
+
+// Routes
+app.use("/api/auth", userrouter);
+app.use("/api/messages", messagerouter);
+
+// ✅ FIXED: Proper 404 handler - remove the problematic "*" route
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: "Route not found"
+    });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+    console.error("🚨 Unhandled error:", error);
+    res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+});
+
+// Socket.io configuration
+export const io = new Server(server, {
+    cors: {
+        origin: process.env.FRONTEND_URL || "http://localhost:5173",
+        credentials: true
+    }
+});
+ 
+export const usersocketmap = {};
+
+io.on("connection", (socket) => {
+    const userId = socket.handshake.query.userId;
+    console.log("🔗 User connected - User ID:", userId, "Socket ID:", socket.id);
+
+    if (userId) {
+        usersocketmap[userId] = socket.id;
+        console.log("📊 Current online users:", Object.keys(usersocketmap));
+        
+        // Broadcast to ALL connected clients
+        io.emit("getonlineusers", Object.keys(usersocketmap));
+    }
+
+    socket.on("userOnline", (userId) => {
+        console.log("🟢 User explicitly online:", userId);
+        if (userId) {
+            usersocketmap[userId] = socket.id;
+            io.emit("getonlineusers", Object.keys(usersocketmap));
+        }
+    });
+
+    socket.on("disconnect", () => {
+        console.log("🔴 User disconnected - User ID:", userId);
+        if (userId) {
+            delete usersocketmap[userId];
+            console.log("📊 Remaining online users:", Object.keys(usersocketmap));
+            io.emit("getonlineusers", Object.keys(usersocketmap));
+        }
+    });
+});
+
+server.listen(PORT, () => {
+    console.log("🚀 Server is running on port " + PORT);
+    console.log("📡 Test server at: http://localhost:" + PORT + "/api/test");
+});
