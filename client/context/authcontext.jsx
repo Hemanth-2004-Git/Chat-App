@@ -1,158 +1,266 @@
-import { createContext, useEffect, useState, useRef } from "react";
-import axios from 'axios';
-import toast from "react-hot-toast";
+// client/context/authcontext.jsx
+
+import { createContext, useContext, useEffect, useState, useMemo } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "../src/libs/firebase.js";
+import axios from "axios";
 import { io } from "socket.io-client";
 
-const backendurl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+export const AuthContext = createContext();
 
-const api = axios.create({
-  baseURL: backendurl,
-});
+const API_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000/api";
+const SOCKET_URL = import.meta.env.VITE_BACKEND_URL?.replace('/api', '') || "http://localhost:5000";
+console.log("AuthContext API_URL:", API_URL);
+console.log("AuthContext SOCKET_URL:", SOCKET_URL);
 
-export const authcontext = createContext();
-
-export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(localStorage.getItem("token"));
-  const [authuser, setAuthuser] = useState(null);
+export const AuthContextProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [socket, setSocket] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const socketRef = useRef(null);
 
-  const checkAuth = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      if (token) {
-        api.defaults.headers.common["token"] = token;
-        const { data } = await api.get("/api/auth/check");
-        if (data.success) {
-          setAuthuser(data.user);
-          initializeSocket(data.user);
-          setToken(token);
-        }
-      }
-    } catch (error) {
-      console.error("Auth check error:", error);
-      localStorage.removeItem("token");
-      delete api.defaults.headers.common["token"];
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const login = async (mode, credentials) => {
-    try {
-      const { data } = await api.post(`/api/auth/${mode}`, credentials);
-      
-      if (data.success) {
-        if (mode === 'login') {
-          setAuthuser(data.userData);
-          initializeSocket(data.userData);
-          api.defaults.headers.common["token"] = data.token;
-          setToken(data.token);
-          localStorage.setItem("token", data.token);
-        }
-        toast.success(data.message);
-        return true;
-      } else {
-        toast.error(data.message);
-        return false;
-      }
-    } catch (error) {
-      console.error("Auth error:", error);
-      const errorMessage = error.response?.data?.message || error.message || "Authentication failed";
-      toast.error(errorMessage);
-      return false;
-    }
-  };
-
-  const logout = async () => {
-    try {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-    } catch (error) {
-      console.error("Logout error:", error);
-    } finally {
-      localStorage.removeItem("token");
-      setToken(null);
-      setAuthuser(null);
-      setOnlineUsers([]);
-      setSocket(null);
-      delete api.defaults.headers.common["token"];
-      toast.success("Logged out successfully");
-    }
-  };
-
-  const updateprofile = async (body) => {
-    try {
-      const { data } = await api.put("/api/auth/update-profile", body);
-      if (data.success) {
-        setAuthuser(data.user);
-        toast.success("Profile updated successfully");
-        return true;
-      }
-    } catch (error) {
-      toast.error(error.response?.data?.message || error.message);
-      return false;
-    }
-  };
-
-  const initializeSocket = (userData) => {
-    if (!userData?._id) return;
-
-    // Prevent duplicate connections
-    if (socketRef.current?.connected) {
-      console.log("✅ Socket already connected");
-      return;
-    }
-
-    console.log("🔌 Connecting socket for user:", userData._id);
-    
-    const newSocket = io(backendurl, {
-      query: {
-        userId: userData._id.toString(),
+  // Create axios instance with interceptors (memoized to prevent recreation)
+  const axiosInstance = useMemo(() => {
+    console.log("Creating axios instance with baseURL:", API_URL);
+    const instance = axios.create({
+      baseURL: API_URL,
+      headers: {
+        "Content-Type": "application/json",
       },
-      transports: ['websocket', 'polling']
-    });
-    
-    socketRef.current = newSocket;
-    setSocket(newSocket);
-
-    newSocket.on("connect", () => {
-      console.log("✅ Socket connected successfully");
-      newSocket.emit("userOnline", userData._id);
     });
 
-    newSocket.on("getonlineusers", (userIds) => {
-      console.log("📱 Online users:", userIds);
-      setOnlineUsers(Array.isArray(userIds) ? userIds : []);
-    });
+    // Add request interceptor to include auth token
+    instance.interceptors.request.use(
+      async (config) => {
+        const token = localStorage.getItem("authToken");
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+          console.log("🔑 Token added to request:", config.url, "Token length:", token.length);
+        } else {
+          console.warn("⚠️ No token found in localStorage for request:", config.url);
+        }
+        return config;
+      },
+      (error) => {
+        return Promise.reject(error);
+      }
+    );
 
-    newSocket.on("disconnect", (reason) => {
-      console.log("🔌 Socket disconnected:", reason);
-    });
-  };
+    // Add response interceptor to handle token refresh
+    instance.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        if (error.response?.status === 401) {
+          // Token expired or invalid, clear auth
+          localStorage.removeItem("authToken");
+          setUser(null);
+          setSocket((prevSocket) => {
+            if (prevSocket) {
+              prevSocket.disconnect();
+            }
+            return null;
+          });
+        }
+        return Promise.reject(error);
+      }
+    );
 
-  useEffect(() => {
-    checkAuth();
+    return instance;
   }, []);
 
+  // Firebase auth state listener
+  useEffect(() => {
+    let currentSocket = null;
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true);
+      
+      // Clean up existing socket before creating new one
+      if (currentSocket) {
+        currentSocket.disconnect();
+        currentSocket = null;
+        setSocket(null);
+      }
+
+      if (firebaseUser) {
+        try {
+          // Get the Firebase ID token
+          const token = await firebaseUser.getIdToken();
+          
+          // Send token to backend to verify and get user data
+          console.log("Axios instance baseURL:", axiosInstance.defaults.baseURL);
+          console.log("Calling /auth/check with baseURL:", axiosInstance.defaults.baseURL);
+          const { data } = await axiosInstance.get("/auth/check", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          if (data.success) {
+            // Store the ID token for future requests
+            localStorage.setItem("authToken", token);
+            // Set user data from our backend (include uid for socket)
+            const userData = { ...data.user, uid: firebaseUser.uid, _id: data.user.uid || firebaseUser.uid };
+            setUser(userData);
+
+            // Initialize socket connection
+            const newSocket = io(SOCKET_URL, {
+              query: {
+                userId: userData.uid || userData._id,
+              },
+              transports: ["websocket"],
+            });
+
+            newSocket.on("connect", () => {
+              console.log("Socket connected:", newSocket.id);
+            });
+
+            newSocket.on("getonlineusers", (users) => {
+              setOnlineUsers(users || []);
+            });
+
+            newSocket.on("disconnect", () => {
+              console.log("Socket disconnected");
+            });
+
+            currentSocket = newSocket;
+            setSocket(newSocket);
+          } else {
+            throw new Error(data.message || "Auth check failed");
+          }
+        } catch (err) {
+          console.error("Auth context error:", err);
+          setUser(null);
+          localStorage.removeItem("authToken");
+          setOnlineUsers([]);
+        }
+      } else {
+        setUser(null);
+        localStorage.removeItem("authToken");
+        setOnlineUsers([]);
+      }
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribe();
+      if (currentSocket) {
+        currentSocket.disconnect();
+      }
+    };
+  }, [axiosInstance]);
+
+
+  // Login function (optional - LoginPage uses Firebase directly)
+  const login = async (email, password) => {
+    try {
+      // This is just for compatibility - LoginPage handles Firebase login directly
+      // If you need backend login, implement it here
+      const token = localStorage.getItem("authToken");
+      if (!token) {
+        throw new Error("No auth token found");
+      }
+      
+      const { data } = await axiosInstance.get("/auth/check");
+      if (data.success) {
+        setUser(data.user);
+        return { success: true, user: data.user };
+      }
+      throw new Error(data.message || "Login failed");
+    } catch (error) {
+      console.error("Login error:", error);
+      throw error;
+    }
+  };
+
+  // Logout function
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      localStorage.removeItem("authToken");
+      if (socket) {
+        socket.disconnect();
+        setSocket(null);
+      }
+      setOnlineUsers([]);
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Still clear local state even if signOut fails
+      setUser(null);
+      localStorage.removeItem("authToken");
+      if (socket) {
+        socket.disconnect();
+        setSocket(null);
+      }
+    }
+  };
+
+  // Update profile function
+  const updateprofile = async (profileData) => {
+    try {
+      console.log("Updating profile with data:", {
+        ...profileData,
+        profilePic: profileData.profilePic ? (profileData.profilePic.length > 50 ? profileData.profilePic.substring(0, 50) + '...' : profileData.profilePic) : 'none'
+      });
+      
+      const { data } = await axiosInstance.put("/auth/update", profileData);
+      
+      console.log("Profile update response:", data);
+      
+      if (data.success) {
+        setUser(data.user);
+        console.log("✅ Profile updated successfully, user state updated");
+        return { success: true, user: data.user };
+      }
+      throw new Error(data.message || "Profile update failed");
+    } catch (error) {
+      console.error("Update profile error:", error);
+      console.error("Error response:", error.response?.data);
+      throw error;
+    }
+  };
+
   const value = {
-    axios: api,
-    authuser,
-    onlineUsers,
-    socket,
+    // User state
+    user,
+    authuser: user, // Alias for compatibility
+    setUser,
+    loading,
+    isLoading: loading, // Alias for compatibility
+    
+    // Functions
     login,
     logout,
     updateprofile,
-    isLoading
+    
+    // Socket and network
+    socket,
+    axios: axiosInstance,
+    onlineUsers,
+    
+    // Firebase auth instance
+    auth,
   };
 
   return (
-    <authcontext.Provider value={value}>
-      {children}
-    </authcontext.Provider>
+    <AuthContext.Provider value={value}>
+      {!loading && children}
+    </AuthContext.Provider>
   );
 };
+
+// Export both named and default context for compatibility
+export const authcontext = AuthContext;
+
+// Custom hook for easier usage
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within AuthContextProvider");
+  }
+  return context;
+};
+
+// Export provider with alias
+export const AuthProvider = AuthContextProvider;

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ready Player Me Avatar Creator - Test Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.95rem;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            max-width: 300px;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        #avatarCreator {
+            display: none;
+            margin-top: 30px;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        #avatarCreator iframe {
+            width: 100%;
+            height: 600px;
+            border: none;
+        }
+
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .result.show {
+            display: block;
+        }
+
+        .result h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        .result-url {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            color: #667eea;
+            margin-bottom: 15px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .result-preview {
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        .result-preview img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        .info {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .info strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧑‍🎨 Ready Player Me Avatar Creator</h1>
+        <p class="subtitle">Create your 3D avatar and see the integration in action</p>
+
+        <button class="button" id="openAvatarCreator">
+            Open Ready Player Me
+        </button>
+
+        <div id="avatarCreator">
+            <iframe
+                id="frame"
+                allow="camera; microphone; fullscreen; autoplay; encrypted-media"
+                title="Ready Player Me Avatar Creator"
+            ></iframe>
+        </div>
+
+        <div class="result" id="result">
+            <h3>✅ Avatar Created Successfully!</h3>
+            <p style="margin-bottom: 15px; color: #666;">Your avatar URL:</p>
+            <div class="result-url" id="avatarUrl">Loading...</div>
+            <div class="result-preview">
+                <img id="avatarPreview" alt="Avatar Preview" />
+            </div>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <div class="info">
+            <strong>ℹ️ How it works:</strong>
+            <ul style="margin-top: 10px; padding-left: 20px;">
+                <li>Click "Open Ready Player Me" to launch the Avatar Creator</li>
+                <li>Customize your avatar (hair, outfit, skin tone, etc.)</li>
+                <li>Click "NEXT" or "Create Avatar" when finished</li>
+                <li>The avatar URL will be captured automatically via postMessage</li>
+                <li>The iframe will hide and show your avatar preview</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const SUBDOMAIN = 'chatapp-t8bhfc'; // Your Ready Player Me subdomain
+        const frame = document.getElementById('frame');
+        const avatarCreator = document.getElementById('avatarCreator');
+        const result = document.getElementById('result');
+        const avatarUrl = document.getElementById('avatarUrl');
+        const avatarPreview = document.getElementById('avatarPreview');
+        const errorDiv = document.getElementById('error');
+        const openButton = document.getElementById('openAvatarCreator');
+
+        // Function to convert GLB URL to Render API PNG URL
+        function convertGLBToRenderAPI(glbUrl) {
+            if (!glbUrl || typeof glbUrl !== 'string') return null;
+            
+            // Extract avatar ID from GLB URL
+            // Format: https://models.readyplayer.me/{avatarId}.glb
+            const match = glbUrl.match(/models\.readyplayer\.me\/([^\/]+)\.glb/i);
+            if (match && match[1]) {
+                const avatarId = match[1];
+                // Use Render API to get PNG image
+                return `https://render.readyplayer.me/render?scene=fullbody-portrait-v1&character=${avatarId}`;
+            }
+            
+            // Try alternative format
+            const altMatch = glbUrl.match(/\/([a-f0-9]{24,})\.glb/i);
+            if (altMatch && altMatch[1]) {
+                return `https://render.readyplayer.me/render?scene=fullbody-portrait-v1&character=${altMatch[1]}`;
+            }
+            
+            return null;
+        }
+
+        // Event listener for Ready Player Me postMessage events
+        window.addEventListener('message', (event) => {
+            // Validate origin
+            const validOrigins = [
+                'readyplayer.me',
+                'models.readyplayer.me',
+                'demo.readyplayer.me',
+                'chatapp-t8bhfc.readyplayer.me',
+                'app.readyplayer.me'
+            ];
+
+            const isValidOrigin = validOrigins.some(origin => 
+                event.origin.includes(origin) || 
+                event.origin === `https://${origin}`
+            );
+
+            if (!isValidOrigin) {
+                return;
+            }
+
+            console.log('📨 Message received from:', event.origin, event.data);
+
+            const data = event.data;
+            if (!data || typeof data !== 'object') {
+                return;
+            }
+
+            // Handle v1.avatar.exported event
+            if (data.eventName === 'v1.avatar.exported' || data.eventName === 'avatar.exported') {
+                const avatarData = data.data || data;
+                
+                // Try to get the URL from various possible fields
+                let url = avatarData?.url || 
+                         avatarData?.urlFullBody || 
+                         avatarData?.urlHalfBody || 
+                         avatarData?.urlPNG || 
+                         avatarData?.pngUrl;
+
+                // If we got a GLB URL, convert it to Render API PNG URL
+                if (url && url.includes('.glb')) {
+                    const renderUrl = convertGLBToRenderAPI(url);
+                    if (renderUrl) {
+                        url = renderUrl;
+                        console.log('✅ Converted GLB URL to Render API URL');
+                    }
+                }
+
+                if (url && url.startsWith('http')) {
+                    console.log('✅ Avatar URL received:', url);
+                    
+                    // Hide the iframe
+                    avatarCreator.style.display = 'none';
+                    
+                    // Show the result
+                    avatarUrl.textContent = url;
+                    avatarUrl.style.color = '#667eea';
+                    
+                    // Try to load preview image
+                    avatarPreview.src = url;
+                    avatarPreview.onload = () => {
+                        console.log('✅ Avatar preview loaded');
+                    };
+                    avatarPreview.onerror = () => {
+                        console.log('⚠️ Avatar preview failed to load (may need Render API or different URL)');
+                        avatarPreview.style.display = 'none';
+                    };
+                    
+                    result.classList.add('show');
+                    
+                    // Hide error if any
+                    errorDiv.classList.remove('show');
+                } else {
+                    console.error('❌ Invalid avatar URL received:', url);
+                    showError('Invalid avatar URL received. Please try again.');
+                }
+            }
+
+            // Handle frame ready event
+            if (data.eventName === 'v1.frame.ready' || data.eventName === 'frame.ready') {
+                console.log('✅ Ready Player Me iframe is ready');
+            }
+
+            // Handle user set event
+            if (data.eventName === 'v1.user.set' || data.eventName === 'user.set') {
+                console.log('✅ Ready Player Me user set');
+            }
+        });
+
+        // Function to show error message
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+            setTimeout(() => {
+                errorDiv.classList.remove('show');
+            }, 5000);
+        }
+
+        // Button click handler
+        openButton.addEventListener('click', () => {
+            // Show the iframe
+            avatarCreator.style.display = 'block';
+            
+            // Hide previous results
+            result.classList.remove('show');
+            errorDiv.classList.remove('show');
+            
+            // Set iframe source
+            frame.src = `https://${SUBDOMAIN}.readyplayer.me/avatar?frameApi&clearCache=true&utm_source=chat-app`;
+            
+            console.log('🚀 Opening Ready Player Me Avatar Creator...');
+        });
+
+        // Log initialization
+        console.log('✅ Ready Player Me Avatar Creator Test Page Loaded');
+        console.log('📍 Using subdomain:', SUBDOMAIN);
+        console.log('💡 For production, change SUBDOMAIN variable to your Ready Player Me subdomain');
+    </script>
+</body>
+</html>
+

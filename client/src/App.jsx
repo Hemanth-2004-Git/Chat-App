@@ -2,6 +2,7 @@ import React, { useContext } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
+import SignupPage from './pages/SignupPage'
 import ProfilePage from './pages/ProfilePage'
 import {Toaster} from "react-hot-toast"
 import { authcontext } from '../context/authcontext'
@@ -38,6 +39,7 @@ const App = () => {
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={!authuser ? <LoginPage /> : <Navigate to="/home" replace />} />
+        <Route path="/signup" element={!authuser ? <SignupPage /> : <Navigate to="/home" replace />} />
         
         {/* Protected routes */}
         <Route path="/home" element={authuser ? <HomePage /> : <Navigate to="/login" replace />} />

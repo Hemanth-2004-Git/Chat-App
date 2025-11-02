@@ -1,3 +1,5 @@
+// server/server.js
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -5,20 +7,33 @@ dotenv.config();
 import http from "http";
 import userrouter from "./routes/userroute.js";
 import { Server } from "socket.io";
-import { connectDB } from "./lib/db.js";
+import { initializeFirebase } from "./lib/firebase.js"; // Import Firebase initializer
 import messagerouter from "./routes/messageroute.js";
 
 const app = express();
 const server = http.createServer(app);
 
-// Connect to database first
-await connectDB();
+// Connect to Firebase Admin
+initializeFirebase();
 
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration
+// CORS configuration - allow multiple localhost ports for development
+const allowedOrigins = process.env.FRONTEND_URL 
+    ? [process.env.FRONTEND_URL]
+    : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:5175"];
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('localhost')) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true
 }));
 
@@ -39,7 +54,7 @@ app.use((req, res, next) => {
 app.get("/api/test", (req, res) => {
     res.json({ 
         success: true, 
-        message: "Backend server is working!",
+        message: "Backend server is working with Firebase!",
         timestamp: new Date().toISOString()
     });
 });
@@ -69,9 +84,13 @@ app.use((error, req, res, next) => {
 });
 
 // Socket.io configuration
+const socketOrigins = process.env.FRONTEND_URL 
+    ? [process.env.FRONTEND_URL]
+    : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:5175"];
+
 export const io = new Server(server, {
     cors: {
-        origin: process.env.FRONTEND_URL || "http://localhost:5173",
+        origin: socketOrigins,
         credentials: true
     }
 });

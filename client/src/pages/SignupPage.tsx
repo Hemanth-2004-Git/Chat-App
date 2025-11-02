@@ -1,64 +1,98 @@
-// client/src/pages/LoginPage.tsx
+// client/src/pages/SignupPage.tsx
 
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { useAuth } from "../../context/authcontext.jsx";
 import { auth } from "../libs/firebase.js";
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import axios from "axios";
 import assets from "../assets/assets";
 
 const API_URL = (import.meta.env as any).VITE_BACKEND_URL || "http://localhost:5000/api";
-console.log("LoginPage API_URL:", API_URL);
+console.log("SignupPage API_URL:", API_URL);
 
-const LoginPage = () => {
+const SignupPage = () => {
   const [loading, setLoading] = useState(false);
-  const { setUser } = useAuth();
   const navigate = useNavigate();
   const googleProvider = new GoogleAuthProvider();
 
-  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     const formData = new FormData(e.currentTarget);
+    const fullName = formData.get("fullName") as string;
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
+    const bio = formData.get("bio") as string;
 
-    if (!email || !password) {
-      toast.error("Please fill in all fields");
+    if (!fullName || !email || !password) {
+      toast.error("Please fill in all required fields");
+      setLoading(false);
+      return;
+    }
+
+    // Validate password length
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters");
       setLoading(false);
       return;
     }
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      // First create user in Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
-      // The onAuthStateChanged listener in AuthContextProvider
-      // will handle fetching user data and setting the user state.
-      console.log("Firebase login successful:", userCredential.user.uid);
+      // Get the ID token to send to backend
+      const token = await userCredential.user.getIdToken();
       
-      toast.success("Logged in successfully!");
-      navigate("/");
-    } catch (err: any) {
-      console.error("Firebase login error:", err);
-      let errorMessage = "Failed to log in.";
-      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        errorMessage = "Invalid email or password.";
+      // Then create user data in backend with authentication token
+      const response = await axios.post(`${API_URL}/auth/signup`, {
+        fullName,
+        email,
+        bio: bio || ""
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.data.success) {
+        toast.success("Account created successfully!");
+        // The auth context will handle user state, navigate to home
+        navigate("/");
+      } else {
+        // If backend signup fails, delete the Firebase user
+        await userCredential.user.delete();
+        toast.error(response.data.message || "Signup failed");
       }
+    } catch (err: any) {
+      console.error("Signup error:", err);
+      let errorMessage = "Failed to create account.";
+      
+      if (err.code === "auth/email-already-in-use") {
+        errorMessage = "Email is already registered.";
+      } else if (err.code === "auth/invalid-email") {
+        errorMessage = "Invalid email address.";
+      } else if (err.code === "auth/weak-password") {
+        errorMessage = "Password is too weak.";
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      }
+      
       toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleSignup = async () => {
     setLoading(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      // Check if user exists in our database, if not create them
+      // Check if user exists in our database
       try {
         const token = await user.getIdToken();
         const checkUrl = `${API_URL}/auth/check`;
@@ -86,21 +120,21 @@ const LoginPage = () => {
           });
         }
         
-        toast.success("Signed in with Google successfully!");
+        toast.success("Signed up with Google successfully!");
         navigate("/");
       } catch (dbError: any) {
         console.error("Database error:", dbError);
         console.error("Error details:", dbError.response?.data || dbError.message);
-        const errorMsg = dbError.response?.data?.message || dbError.message || "Failed to load profile";
-        toast.error(`Login successful but ${errorMsg}. The auth context will handle the rest.`);
+        const errorMsg = dbError.response?.data?.message || dbError.message || "Failed to initialize profile";
+        toast.error(`Account created but ${errorMsg}. The auth context will handle the rest.`);
         // Let the auth context handle the user state from Firebase
-        navigate("/");
+        navigate("/login");
       }
     } catch (err: any) {
-      console.error("Google login error:", err);
-      let errorMessage = "Failed to sign in with Google.";
+      console.error("Google signup error:", err);
+      let errorMessage = "Failed to sign up with Google.";
       if (err.code === "auth/popup-closed-by-user") {
-        errorMessage = "Sign-in cancelled.";
+        errorMessage = "Sign-up cancelled.";
       }
       toast.error(errorMessage);
     } finally {
@@ -125,16 +159,16 @@ const LoginPage = () => {
       {/* Content with relative positioning */}
       <div className="relative z-10 w-full max-w-md p-8 space-y-6 bg-gray-900/80 backdrop-blur-xl rounded-xl shadow-2xl border border-gray-700/50">
         <h1 className="text-3xl font-bold text-center text-white">
-          Welcome Back!
+          Create Account
         </h1>
         <p className="text-center text-gray-300">
-          Sign in to continue to your account
+          Sign up to start chatting with your friends!
         </p>
 
-        {/* Google Sign In Button */}
+        {/* Google Sign Up Button */}
         <button
           type="button"
-          onClick={handleGoogleLogin}
+          onClick={handleGoogleSignup}
           disabled={loading}
           className="w-full flex items-center justify-center px-4 py-3 border border-gray-600 rounded-lg shadow-sm bg-gray-800/50 backdrop-blur-sm text-sm font-medium text-white hover:bg-gray-700/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 disabled:opacity-50 transition-colors"
         >
@@ -156,7 +190,7 @@ const LoginPage = () => {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
             />
           </svg>
-          {loading ? "Signing in..." : "Sign in with Google"}
+          {loading ? "Signing up..." : "Sign up with Google"}
         </button>
 
         <div className="relative">
@@ -164,11 +198,27 @@ const LoginPage = () => {
             <div className="w-full border-t border-gray-600"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-gray-900/80 text-gray-400">Or continue with email</span>
+            <span className="px-2 bg-gray-900/80 text-gray-400">Or sign up with email</span>
           </div>
         </div>
 
-        <form className="space-y-6" onSubmit={handleLogin}>
+        <form className="space-y-6" onSubmit={handleSignup}>
+          <div>
+            <label
+              htmlFor="fullName"
+              className="block text-sm font-medium text-gray-300"
+            >
+              Full Name
+            </label>
+            <input
+              type="text"
+              name="fullName"
+              id="fullName"
+              placeholder="Enter your full name"
+              required
+              className="w-full px-3 py-2 mt-1 bg-gray-800/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-colors"
+            />
+          </div>
           <div>
             <label
               htmlFor="email"
@@ -196,9 +246,25 @@ const LoginPage = () => {
               type="password"
               name="password"
               id="password"
-              placeholder="Enter your password"
+              placeholder="Enter your password (min. 6 characters)"
               required
+              minLength={6}
               className="w-full px-3 py-2 mt-1 bg-gray-800/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-colors"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="bio"
+              className="block text-sm font-medium text-gray-300"
+            >
+              Bio (Optional)
+            </label>
+            <textarea
+              name="bio"
+              id="bio"
+              placeholder="Tell us about yourself"
+              rows={3}
+              className="w-full px-3 py-2 mt-1 bg-gray-800/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-colors resize-none"
             />
           </div>
           <button
@@ -206,17 +272,17 @@ const LoginPage = () => {
             className="w-full px-4 py-3 font-medium text-white bg-gradient-to-r from-violet-600 to-purple-600 rounded-lg hover:from-violet-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 disabled:opacity-50 transition-all shadow-lg"
             disabled={loading}
           >
-            {loading ? "Signing In..." : "Sign In"}
+            {loading ? "Creating Account..." : "Sign Up"}
           </button>
         </form>
 
         <div className="text-sm text-center text-gray-400">
-          Don&apos;t have an account?{" "}
+          Already have an account?{" "}
           <Link
-            to="/signup"
+            to="/login"
             className="font-medium text-violet-400 hover:text-violet-300 transition-colors"
           >
-            Sign Up
+            Sign In
           </Link>
         </div>
       </div>
@@ -224,4 +290,5 @@ const LoginPage = () => {
   );
 };
 
-export default LoginPage;
+export default SignupPage;
+
