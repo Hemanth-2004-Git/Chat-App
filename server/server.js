@@ -28,8 +28,9 @@ app.use(cors({
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         
-        // Allow Render URLs
+        // Allow Render and Vercel URLs
         if (origin.includes('onrender.com') || 
+            origin.includes('vercel.app') || 
             allowedOrigins.indexOf(origin) !== -1 || 
             origin.includes('localhost')) {
             callback(null, true);
@@ -97,8 +98,9 @@ export const io = new Server(server, {
             // Allow requests with no origin
             if (!origin) return callback(null, true);
             
-            // Allow Render URLs and configured origins
+            // Allow Render and Vercel URLs and configured origins
             if (origin.includes('onrender.com') || 
+                origin.includes('vercel.app') || 
                 socketOrigins.indexOf(origin) !== -1 || 
                 origin.includes('localhost')) {
                 callback(null, true);
