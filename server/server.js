@@ -3,7 +3,13 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-dotenv.config();
+// Load .env file from server directory
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __serverDir = dirname(__filename);
+dotenv.config({ path: join(__serverDir, ".env") });
 import http from "http";
 import userrouter from "./routes/userroute.js";
 import { Server } from "socket.io";

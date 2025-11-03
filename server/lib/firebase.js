@@ -4,7 +4,8 @@ import admin from "firebase-admin";
 import { createRequire } from "module";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname, join, resolve } from "path";
+import { existsSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,23 +25,36 @@ const getServiceAccount = () => {
   }
 
   // Option 2: Try serviceAccountKey.json file
-  const serviceAccountPath = join(__dirname, "..", "serviceAccountKey.json");
-  try {
-    const serviceAccountContent = readFileSync(serviceAccountPath, "utf8");
-    const parsed = JSON.parse(serviceAccountContent);
-    console.log("✅ Using serviceAccountKey.json file");
-    return parsed;
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      console.error(`❌ serviceAccountKey.json file not found at: ${serviceAccountPath}`);
-      console.error(`   Current working directory: ${process.cwd()}`);
-      console.error(`   Looking in: ${serviceAccountPath}`);
-    } else if (error instanceof SyntaxError) {
-      console.error("❌ Failed to parse serviceAccountKey.json:", error.message);
-    } else {
-      console.error(`❌ Failed to read serviceAccountKey.json at ${serviceAccountPath}:`, error.message);
+  // Try multiple possible paths (in order of preference)
+  const possiblePaths = [
+    join(process.cwd(), "serviceAccountKey.json"),   // Current working dir (most reliable)
+    resolve(process.cwd(), "serviceAccountKey.json"), // Absolute path from CWD
+    join(__dirname, "..", "serviceAccountKey.json"),  // Relative to lib directory
+    resolve(__dirname, "..", "serviceAccountKey.json"), // Absolute from lib directory
+  ];
+  
+  for (const serviceAccountPath of possiblePaths) {
+    if (existsSync(serviceAccountPath)) {
+      try {
+        const serviceAccountContent = readFileSync(serviceAccountPath, "utf8");
+        const parsed = JSON.parse(serviceAccountContent);
+        console.log(`✅ Using serviceAccountKey.json file from: ${serviceAccountPath}`);
+        return parsed;
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          console.error(`❌ Failed to parse serviceAccountKey.json at ${serviceAccountPath}:`, error.message);
+        } else {
+          console.error(`❌ Failed to read serviceAccountKey.json at ${serviceAccountPath}:`, error.message);
+        }
+      }
     }
   }
+  
+  // If we get here, file wasn't found in any location
+  console.error(`❌ serviceAccountKey.json not found in any of these locations:`);
+  possiblePaths.forEach(path => console.error(`   - ${path}`));
+  console.error(`   Current working directory: ${process.cwd()}`);
+  console.error(`   __dirname: ${__dirname}`);
 
   // If neither option works, throw an error
   throw new Error(
