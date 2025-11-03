@@ -27,12 +27,18 @@ const getServiceAccount = () => {
   const serviceAccountPath = join(__dirname, "..", "serviceAccountKey.json");
   try {
     const serviceAccountContent = readFileSync(serviceAccountPath, "utf8");
-    return JSON.parse(serviceAccountContent);
+    const parsed = JSON.parse(serviceAccountContent);
+    console.log("✅ Using serviceAccountKey.json file");
+    return parsed;
   } catch (error) {
     if (error.code === "ENOENT") {
-      console.error("❌ serviceAccountKey.json file not found");
+      console.error(`❌ serviceAccountKey.json file not found at: ${serviceAccountPath}`);
+      console.error(`   Current working directory: ${process.cwd()}`);
+      console.error(`   Looking in: ${serviceAccountPath}`);
+    } else if (error instanceof SyntaxError) {
+      console.error("❌ Failed to parse serviceAccountKey.json:", error.message);
     } else {
-      console.error("❌ Failed to read serviceAccountKey.json:", error.message);
+      console.error(`❌ Failed to read serviceAccountKey.json at ${serviceAccountPath}:`, error.message);
     }
   }
 
