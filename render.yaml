@@ -1,0 +1,57 @@
+services:
+  # Backend Server (Node.js API)
+  - type: web
+    name: chat-app-server
+    env: node
+    plan: free
+    buildCommand: cd server && npm install
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # Firebase Service Account - Set this in Render Dashboard
+      # - key: FIREBASE_SERVICE_ACCOUNT
+      #   value: your_firebase_service_account_json_string
+      # Cloudinary Configuration - Set these in Render Dashboard
+      # - key: CLOUDINARY_CLOUD_NAME
+      #   value: your_cloudinary_cloud_name
+      # - key: CLOUDINARY_API_KEY
+      #   value: your_cloudinary_api_key
+      # - key: CLOUDINARY_API_SECRET
+      #   value: your_cloudinary_api_secret
+      # Frontend URL - Update after client is deployed
+      # - key: FRONTEND_URL
+      #   value: https://your-client-app.onrender.com
+
+  # Frontend Client (Static Site)
+  - type: web
+    name: chat-app-client
+    env: static
+    plan: free
+    buildCommand: cd client && npm install && npm run build
+    staticPublishPath: client/dist
+    envVars:
+      # Backend API URL - Update after server is deployed
+      # - key: VITE_BACKEND_URL
+      #   value: https://chat-app-server.onrender.com/api
+      # Firebase Configuration - Set these in Render Dashboard
+      # - key: VITE_FIREBASE_API_KEY
+      #   value: your_firebase_api_key
+      # - key: VITE_FIREBASE_AUTH_DOMAIN
+      #   value: your_project.firebaseapp.com
+      # - key: VITE_FIREBASE_DATABASE_URL
+      #   value: https://your_project.firebaseio.com
+      # - key: VITE_FIREBASE_PROJECT_ID
+      #   value: your_project_id
+      # - key: VITE_FIREBASE_STORAGE_BUCKET
+      #   value: your_project.appspot.com
+      # - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+      #   value: your_sender_id
+      # - key: VITE_FIREBASE_APP_ID
+      #   value: your_app_id
+      # Ready Player Me Configuration
+      # - key: VITE_READY_PLAYER_ME_SUBDOMAIN
+      #   value: chatapp-t8bhfc
+

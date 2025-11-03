@@ -18,7 +18,7 @@ initializeFirebase();
 
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration - allow multiple localhost ports for development
+// CORS configuration - allow multiple localhost ports for development and Render URLs
 const allowedOrigins = process.env.FRONTEND_URL 
     ? [process.env.FRONTEND_URL]
     : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:5175"];
@@ -28,7 +28,10 @@ app.use(cors({
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         
-        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('localhost')) {
+        // Allow Render URLs
+        if (origin.includes('onrender.com') || 
+            allowedOrigins.indexOf(origin) !== -1 || 
+            origin.includes('localhost')) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
@@ -83,14 +86,26 @@ app.use((error, req, res, next) => {
     });
 });
 
-// Socket.io configuration
+// Socket.io configuration - allow Render URLs
 const socketOrigins = process.env.FRONTEND_URL 
     ? [process.env.FRONTEND_URL]
     : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:5175"];
 
 export const io = new Server(server, {
     cors: {
-        origin: socketOrigins,
+        origin: function (origin, callback) {
+            // Allow requests with no origin
+            if (!origin) return callback(null, true);
+            
+            // Allow Render URLs and configured origins
+            if (origin.includes('onrender.com') || 
+                socketOrigins.indexOf(origin) !== -1 || 
+                origin.includes('localhost')) {
+                callback(null, true);
+            } else {
+                callback(new Error('Not allowed by CORS'));
+            }
+        },
         credentials: true
     }
 });
