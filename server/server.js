@@ -80,30 +80,8 @@ app.use((req, res, next) => {
     next();
 });
 
-// Explicit OPTIONS handler for all routes (must be after CORS middleware)
-app.options('*', (req, res) => {
-    const origin = req.headers.origin;
-    console.log('🔄 Handling OPTIONS preflight request for:', req.url, 'Origin:', origin);
-    
-    // Validate origin using same logic as CORS
-    if (!origin || 
-        origin.includes('onrender.com') || 
-        origin.includes('vercel.app') || 
-        origin.includes('netlify.app') ||
-        allowedOrigins.indexOf(origin) !== -1 || 
-        origin.includes('localhost')) {
-        res.header('Access-Control-Allow-Origin', origin || '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-        res.header('Access-Control-Allow-Credentials', 'true');
-        res.header('Access-Control-Max-Age', '86400'); // 24 hours
-        console.log('✅ OPTIONS preflight allowed for origin:', origin);
-        res.status(204).end();
-    } else {
-        console.log('❌ OPTIONS preflight blocked for origin:', origin);
-        res.status(403).end();
-    }
-});
+// Note: CORS middleware already handles OPTIONS preflight requests automatically
+// No need for explicit OPTIONS handler in Express 5
 
 // Test route
 app.get("/api/test", (req, res) => {
