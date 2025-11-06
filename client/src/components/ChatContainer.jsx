@@ -7,6 +7,8 @@ import { useContext } from 'react'
 import { toast } from 'react-hot-toast'
 import ForwardMessageModal from './ForwardMessageModal'
 import ImageViewerModal from './ImageViewerModal'
+import EmojiPicker from './EmojiPicker'
+import CameraModal from './CameraModal'
 
 const ChatContainer = () => {
   const {messages, selectedUser, setSelectedUser, sendMessage, getMessages, users, deleteMessage, editMessage, forwardMessage, loadingMessages} = useContext(chatContext)
@@ -23,6 +25,7 @@ const ChatContainer = () => {
   const [showForwardModal, setShowForwardModal] = useState(false)
   const [messagesToForward, setMessagesToForward] = useState([])
   const [viewingImage, setViewingImage] = useState(null)
+  const [showCamera, setShowCamera] = useState(false)
 
   // Safe message sending
   const handleSendMessage = async () => {
@@ -120,6 +123,27 @@ const ChatContainer = () => {
     if(e.key === "Enter") {
       e.preventDefault()
       handleSendMessage()
+    }
+  }
+
+  const handleEmojiSelect = (emoji) => {
+    setInput(prev => prev + emoji)
+    // Focus back on input after emoji selection
+    setTimeout(() => {
+      const inputElement = document.querySelector('input[type="text"]')
+      if (inputElement) {
+        inputElement.focus()
+      }
+    }, 100)
+  }
+
+  const handleCameraCapture = async (imageData) => {
+    try {
+      await sendMessage({ image: imageData })
+      toast.success("Photo sent!")
+    } catch (error) {
+      console.error(error)
+      toast.error(error.response?.data?.message || "Failed to send photo")
     }
   }
 
@@ -799,10 +823,25 @@ const ChatContainer = () => {
             className='flex-1 text-sm p-3 border-none rounded-lg outline-none text-white placeholder-gray-400 bg-transparent'
                     disabled={!!editingMessage}
           />
-                  <input onChange={handlesendimage} type="file" id='image' accept='image/png,image/jpeg,image/jpg,image/gif,image/webp' hidden/>
-          <label htmlFor="image" className="cursor-pointer">
-            <img src={assets.gallery_icon} alt="Attach image" className="w-5 mr-2"/>
-          </label>
+          {!editingMessage && (
+            <div className="flex items-center gap-2">
+              <EmojiPicker onEmojiSelect={handleEmojiSelect} />
+              <button
+                onClick={() => setShowCamera(true)}
+                className="cursor-pointer hover:opacity-80 transition-opacity"
+                title="Take photo"
+              >
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+              <input onChange={handlesendimage} type="file" id='image' accept='image/png,image/jpeg,image/jpg,image/gif,image/webp' hidden/>
+              <label htmlFor="image" className="cursor-pointer">
+                <img src={assets.gallery_icon} alt="Attach image" className="w-5"/>
+              </label>
+            </div>
+          )}
         </div>
                 {editingMessage ? (
                   <div className='flex gap-2'>
@@ -848,6 +887,13 @@ const ChatContainer = () => {
         onClose={() => setViewingImage(null)}
         imageUrl={viewingImage?.url || viewingImage}
         imageName={viewingImage?.filename || `image-${Date.now()}.jpg`}
+      />
+
+      {/* Camera Modal */}
+      <CameraModal
+        isOpen={showCamera}
+        onClose={() => setShowCamera(false)}
+        onCapture={handleCameraCapture}
       />
     </div>
   )

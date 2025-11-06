@@ -409,6 +409,134 @@ export const creategroup = async (req, res) => {
     }
 }
 
+// Get recent chats - users and groups the user has chatted with, ordered by last message
+export const getrecentchats = async (req, res) => {
+    try {
+        const myId = req.user.uid;
+        const recentChats = [];
+        const unseenmessages = {};
+
+        // 1. Get all chats where user has messages
+        const chatsSnapshot = await db.ref('chats').once('value');
+        const allChats = chatsSnapshot.val() || {};
+
+        // 2. Process individual chats
+        for (const chatId in allChats) {
+            const chat = allChats[chatId];
+            const messages = chat.messages || {};
+            
+            // Check if this chat involves the current user
+            const [uid1, uid2] = chatId.split('_');
+            if (uid1 !== myId && uid2 !== myId) continue;
+            
+            const otherUserId = uid1 === myId ? uid2 : uid1;
+            
+            // Get last message and timestamp
+            let lastMessage = null;
+            let lastTimestamp = 0;
+            let unseenCount = 0;
+            
+            for (const msgId in messages) {
+                const msg = messages[msgId];
+                const msgTimestamp = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
+                
+                if (msgTimestamp > lastTimestamp) {
+                    lastTimestamp = msgTimestamp;
+                    lastMessage = msg;
+                }
+                
+                // Count unseen messages
+                if (msg.receiverId === myId && msg.seen === false) {
+                    unseenCount++;
+                }
+            }
+            
+            if (lastMessage) {
+                // Get user info
+                const userSnapshot = await db.ref(`users/${otherUserId}`).once('value');
+                if (userSnapshot.exists()) {
+                    const userData = userSnapshot.val();
+                    recentChats.push({
+                        ...userData,
+                        _id: otherUserId,
+                        uid: otherUserId,
+                        id: otherUserId,
+                        lastMessage: lastMessage.text || (lastMessage.image ? 'Photo' : ''),
+                        lastTimestamp: lastTimestamp,
+                        isGroup: false
+                    });
+                    
+                    if (unseenCount > 0) {
+                        unseenmessages[otherUserId] = unseenCount;
+                    }
+                }
+            }
+        }
+
+        // 3. Process group chats
+        const groupsSnapshot = await db.ref('groups').once('value');
+        const allGroups = groupsSnapshot.val() || {};
+        
+        for (const groupId in allGroups) {
+            const group = allGroups[groupId];
+            
+            // Check if user is a member
+            if (!group.members || !group.members.includes(myId)) continue;
+            
+            // Get last message from group messages
+            const groupMessagesRef = db.ref(`groups/${groupId}/messages`);
+            const groupMessagesSnapshot = await groupMessagesRef.orderByChild('timestamp').limitToLast(1).once('value');
+            
+            let lastMessage = null;
+            let lastTimestamp = 0;
+            let unseenCount = 0;
+            
+            groupMessagesSnapshot.forEach(child => {
+                const msg = child.val();
+                const msgTimestamp = msg.timestamp ? new Date(msg.timestamp).getTime() : 0;
+                lastTimestamp = msgTimestamp;
+                lastMessage = msg;
+            });
+            
+            // Count unseen messages in group
+            const allGroupMessages = await groupMessagesRef.once('value');
+            allGroupMessages.forEach(child => {
+                const msg = child.val();
+                if (msg.receiverId === myId && msg.seen === false) {
+                    unseenCount++;
+                }
+            });
+            
+            if (lastMessage || group.members.includes(myId)) {
+                recentChats.push({
+                    ...group,
+                    _id: groupId,
+                    uid: groupId,
+                    id: groupId,
+                    // Ensure consistent fields for frontend
+                    fullName: group.name || group.fullName || 'Group',
+                    profilePic: group.groupPic || group.profilePic || null,
+                    lastMessage: lastMessage ? (lastMessage.text || (lastMessage.image ? 'Photo' : '')) : '',
+                    lastTimestamp: lastTimestamp || 0,
+                    isGroup: true
+                });
+                
+                if (unseenCount > 0) {
+                    unseenmessages[groupId] = unseenCount;
+                }
+            }
+        }
+
+        // 4. Sort by last message timestamp (most recent first)
+        recentChats.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+
+        res.json({ success: true, recentChats, unseenmessages });
+    } catch (error) {
+        console.log("Error getting recent chats:", error.message);
+        res.json({ success: false, message: error.message });
+    }
+};
+
 export const getgroups = async (req, res) => {
     try {
         const myId = req.user.uid;
@@ -879,7 +1007,7 @@ export const addparticipants = async (req, res) => {
             const { id: groupId, userId } = req.params;
             const myId = req.user.uid;
 
-            // Verify user is admin of the group
+            // Verify group exists
             const groupSnapshot = await db.ref(`groups/${groupId}`).once('value');
             if (!groupSnapshot.exists()) {
                 return res.status(404).json({
@@ -889,19 +1017,34 @@ export const addparticipants = async (req, res) => {
             }
 
             const group = groupSnapshot.val();
-            if (group.adminId !== myId) {
+            const isAdmin = group.adminId === myId;
+            const isRemovingSelf = userId === myId;
+
+            // Allow: 1) Admin removing others, 2) Any participant removing themselves
+            if (!isAdmin && !isRemovingSelf) {
                 return res.status(403).json({
                     success: false,
-                    message: "Only group admin can remove participants"
+                    message: "Only group admin can remove other participants"
                 });
             }
 
-            // Cannot remove admin
-            if (userId === group.adminId) {
+            // Cannot remove admin (even if admin tries to remove themselves, they need to transfer admin first)
+            if (userId === group.adminId && !isRemovingSelf) {
                 return res.status(400).json({
                     success: false,
-                    message: "Cannot remove group admin"
+                    message: "Cannot remove group admin. Admin must transfer ownership first."
                 });
+            }
+            
+            // If admin is removing themselves, check if there are other members
+            if (isRemovingSelf && isAdmin) {
+                const currentMembers = group.members || [];
+                if (currentMembers.length <= 1) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Cannot exit group as the only member. Delete the group instead."
+                    });
+                }
             }
 
             // Get current members
@@ -923,12 +1066,15 @@ export const addparticipants = async (req, res) => {
             // Get user data for system message
             const userSnapshot = await db.ref(`users/${userId}`).once('value');
             const userName = userSnapshot.exists() ? userSnapshot.val().fullName : 'User';
+            const currentUserName = req.user.fullName || 'User';
 
             // Create system message
             const systemMessage = {
                 senderId: 'system',
                 senderName: 'System',
-                text: `${req.user.fullName || 'Admin'} removed ${userName}`,
+                text: isRemovingSelf 
+                    ? `${userName} left the group`
+                    : `${currentUserName} removed ${userName}`,
                 timestamp: admin.database.ServerValue.TIMESTAMP,
                 type: 'system'
             };

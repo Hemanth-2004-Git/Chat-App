@@ -10,6 +10,7 @@ const Sidebar = () => {
     const { 
         getUsers, 
         users, 
+        recentChats,
         selectedUser, 
         setSelectedUser, 
         unseenMessages 
@@ -26,22 +27,21 @@ const Sidebar = () => {
     }, []); // Empty dependency array
 
     // ✅ Safe filtering with fallbacks
-    // Change: Do not show all users by default; only show when searching
+    // Show recent chats when no search, show filtered users when searching
     const trimmedQuery = (input || '').trim().toLowerCase();
+    const currentUserId = authuser?._id || authuser?.uid;
+    
+    // When searching, show filtered users
     const filteredUsers = trimmedQuery
-        ? (users || []).filter((user) => 
-            user?.fullName?.toLowerCase().includes(trimmedQuery)
-          ) 
+        ? (users || []).filter((user) => {
+            if (!user) return false;
+            const userId = user._id || user.uid || user.id;
+            return userId && userId !== currentUserId && user?.fullName?.toLowerCase().includes(trimmedQuery);
+          }) 
         : [];
 
-    // ✅ Don't show current user in the list with safe filtering
-    // Check both _id and uid to handle different user object structures
-    const currentUserId = authuser?._id || authuser?.uid;
-    const otherUsers = filteredUsers.filter(user => {
-        if (!user) return false;
-        const userId = user._id || user.uid || user.id;
-        return userId && userId !== currentUserId;
-    });
+    // When not searching, show recent chats (users/groups the user has chatted with)
+    const displayUsers = trimmedQuery ? filteredUsers : (recentChats || []);
 
     // ✅ Safe online check function
     const isUserOnline = (userId) => {
@@ -121,11 +121,11 @@ const Sidebar = () => {
 
                 {/* User List */}
             <div className="flex flex-col">
-                {otherUsers.length > 0 ? (
-                    otherUsers.map((user) => {
+                {displayUsers.length > 0 ? (
+                    displayUsers.map((user) => {
                         // ✅ Safe checks with fallbacks
                         const userId = user?._id || user?.uid || user?.id;
-                        const userName = user?.fullName || 'Unknown User';
+                        const userName = user?.fullName || user?.name || (user?.isGroup ? 'Group' : 'Unknown User');
                         const userProfilePic = user?.profilePic || assets.avatar_icon;
                         
                         const selectedUserId = selectedUser?._id || selectedUser?.uid || selectedUser?.id;
@@ -180,6 +180,12 @@ const Sidebar = () => {
                                                 Group
                                             </span>
                                         )}
+                                        {/* Show last message preview for recent chats */}
+                                        {!trimmedQuery && user.lastMessage && (
+                                            <span className="text-xs text-gray-500 truncate mt-0.5">
+                                                {user.lastMessage}
+                                            </span>
+                                        )}
                                     </div>
                                     {hasUnseenMessages && (
                                         <div className="flex-shrink-0 min-w-[20px] h-5 px-1.5 flex justify-center items-center rounded-full bg-[#25D366] text-white text-[11px] font-bold shadow-md">
@@ -191,9 +197,9 @@ const Sidebar = () => {
                     })
                 ) : (
                     <div className="text-center text-gray-400 py-8">
-                        <p>{trimmedQuery ? 'No users found' : 'Search to start a chat'}</p>
+                        <p>{trimmedQuery ? 'No users found' : 'No recent chats'}</p>
                         <p className="text-sm mt-1">
-                            {trimmedQuery ? 'Try a different name' : 'Type a name above to find someone'}
+                            {trimmedQuery ? 'Try a different name' : 'Start a conversation to see it here'}
                         </p>
                     </div>
                 )}

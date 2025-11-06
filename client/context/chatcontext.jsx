@@ -8,6 +8,7 @@ export const ChatProvider = ({ children }) => {
     const [messages, setMessages] = useState([]);
     const [selectedUser, setSelectedUser] = useState(null);
     const [users, setUsers] = useState([]);
+    const [recentChats, setRecentChats] = useState([]);
     const [unseenMessages, setUnseenMessages] = useState({});
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessages, setLoadingMessages] = useState(false);
@@ -109,6 +110,51 @@ export const ChatProvider = ({ children }) => {
             setIsLoading(false);
         }
     }, [axios, isLoading, user, auth]);
+
+    // ✅ Get recent chats - users and groups the user has chatted with
+    const getRecentChats = useCallback(async () => {
+        if (!axios || !user) {
+            console.log("⚠️ Axios or user not available, skipping getRecentChats");
+            return;
+        }
+        
+        let token = localStorage.getItem("authToken");
+        if (!token && auth?.currentUser) {
+            try {
+                token = await auth.currentUser.getIdToken();
+                localStorage.setItem("authToken", token);
+            } catch (tokenError) {
+                console.error("❌ Failed to get token:", tokenError);
+                return;
+            }
+        }
+        
+        if (!token) {
+            console.log("⚠️ No auth token, cannot fetch recent chats");
+            return;
+        }
+        
+        try {
+            const { data } = await axios.get("/messages/recent", {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+            
+            if (data.success) {
+                setRecentChats(data.recentChats || []);
+                // Merge unseen messages
+                setUnseenMessages(prev => ({
+                    ...prev,
+                    ...(data.unseenmessages || {})
+                }));
+                console.log("✅ Recent chats received:", data.recentChats?.length || 0, "chats");
+            }
+        } catch (error) {
+            console.error("❌ Error fetching recent chats:", error);
+            // Don't show error toast for this, it's not critical
+        }
+    }, [axios, user, auth]);
 
     const getMessages = async (userId, isGroup = false) => {
         if (!userId) return;
@@ -225,6 +271,9 @@ export const ChatProvider = ({ children }) => {
                             
                             return updated;
                         });
+                        
+                        // ✅ Refresh recent chats to update order after sending message
+                        getRecentChats();
                         
                         // Don't emit socket events for group messages - server handles that
                         // Only emit for regular chats if needed
@@ -400,12 +449,17 @@ export const ChatProvider = ({ children }) => {
                     ...prev,
                     [newMessage.senderId]: 0
                 }));
+                
+                // ✅ Refresh recent chats to update order
+                getRecentChats();
             } else if (!selectedUser || !selectedUser.isGroup) {
                 // Message from another user - increment unseen count if not in current chat
                 setUnseenMessages(prev => ({
                     ...prev,
                     [newMessage.senderId]: (prev[newMessage.senderId] || 0) + 1
                 }));
+                // ✅ Refresh recent chats to update order when message received from another user
+                getRecentChats();
             }
         };
 
@@ -457,12 +511,17 @@ export const ChatProvider = ({ children }) => {
                         ...prev,
                         [newMessage.groupId]: 0
                     }));
+                    
+                    // ✅ Refresh recent chats to update order
+                    getRecentChats();
                 } else {
                     // Group message from another group - increment unseen count
                     setUnseenMessages(prev => ({
                         ...prev,
                         [newMessage.groupId]: (prev[newMessage.groupId] || 0) + 1
                     }));
+                    // ✅ Refresh recent chats to update order when message received from another group
+                    getRecentChats();
                 }
             };
 
@@ -506,7 +565,7 @@ export const ChatProvider = ({ children }) => {
                 socket.off("messagedeleted", handleMessageDeleted);
                 socket.off("messageedited", handleMessageEdited);
             };
-    }, [socket, selectedUser, axios]);
+    }, [socket, selectedUser, axios, getRecentChats]);
 
     // ✅ FIXED: Load users only when user is authenticated and axios is available
     // Use a ref to track if we've already fetched to prevent multiple calls
@@ -519,9 +578,10 @@ export const ChatProvider = ({ children }) => {
             // Check if token exists in localStorage
             const token = localStorage.getItem("authToken");
             if (token) {
-                console.log("✅ User authenticated, fetching users. Token exists:", !!token);
+                console.log("✅ User authenticated, fetching users and recent chats. Token exists:", !!token);
                 fetchAttemptedRef.current = true;
                 getUsers();
+                getRecentChats(); // Also fetch recent chats
             } else {
                 console.log("⚠️ No auth token found in localStorage, waiting for authentication...");
             }
@@ -533,8 +593,9 @@ export const ChatProvider = ({ children }) => {
         // Reset ref if user logs out
         if (!user) {
             fetchAttemptedRef.current = false;
+            setRecentChats([]);
         }
-    }, [axios, user, getUsers]); // Include getUsers since it's memoized
+    }, [axios, user, getUsers, getRecentChats]); // Include getUsers and getRecentChats since they're memoized
 
         const forwardMessage = async (messagesToForward, recipientId) => {
             try {
@@ -606,9 +667,11 @@ export const ChatProvider = ({ children }) => {
             selectedUser,
             setSelectedUser: handleSetSelectedUser,
             users,
+            recentChats,
             unseenMessages,
             setUnseenMessages,
             getUsers,
+            getRecentChats,
             getMessages,
             sendMessage,
             deleteMessage,

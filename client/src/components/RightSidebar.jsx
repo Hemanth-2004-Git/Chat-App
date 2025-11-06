@@ -7,7 +7,7 @@ import ImageViewerModal from './ImageViewerModal'
 
 const RightSidebar = ({selectedUser, messages = [], onClose}) => {
   const { logout, onlineUsers, user, axios } = useContext(authcontext)
-  const { getUsers, setSelectedUser } = useContext(chatContext)
+  const { getUsers, getRecentChats, setSelectedUser } = useContext(chatContext)
   const [isEditing, setIsEditing] = useState(false)
   const [groupName, setGroupName] = useState(selectedUser?.fullName || selectedUser?.name || '')
   const [groupPic, setGroupPic] = useState(null)
@@ -18,6 +18,7 @@ const RightSidebar = ({selectedUser, messages = [], onClose}) => {
   const [viewingImage, setViewingImage] = useState(null)
   const isGroup = selectedUser?.isGroup === true
   const isAdmin = isGroup && selectedUser?.adminId === (user?._id || user?.uid)
+  const currentUserId = user?._id || user?.uid
 
   if (!selectedUser) return null
 
@@ -155,6 +156,28 @@ const RightSidebar = ({selectedUser, messages = [], onClose}) => {
     } catch (error) {
       console.error('Error removing member:', error)
       toast.error(error.response?.data?.message || 'Failed to remove member')
+    }
+  }
+
+  const handleExitGroup = async () => {
+    if (!isGroup || !currentUserId) return
+    if (!window.confirm('Exit this group? You will no longer receive messages from it.')) return
+
+    try {
+      const { data } = await axios.delete(`/messages/groups/remove/${selectedUser._id}/${currentUserId}`)
+      if (data.success) {
+        toast.success('You left the group')
+        // Deselect chat and refresh lists
+        setSelectedUser(null)
+        getUsers()
+        if (getRecentChats) getRecentChats()
+        if (onClose) onClose()
+      } else {
+        toast.error(data.message || 'Failed to exit group')
+      }
+    } catch (error) {
+      console.error('Error exiting group:', error)
+      toast.error(error.response?.data?.message || 'Failed to exit group')
     }
   }
 
@@ -405,8 +428,17 @@ const RightSidebar = ({selectedUser, messages = [], onClose}) => {
         imageName={viewingImage?.filename || `image-${Date.now()}.jpg`}
       />
 
-      {/* Logout Button (only for non-group chats) */}
-      {!isGroup && (
+      {/* Bottom action button */}
+      {isGroup ? (
+        <div className='absolute bottom-5 left-0 right-0 px-5'>
+          <button 
+            onClick={handleExitGroup}
+            className='w-full bg-red-600/80 hover:bg-red-600 text-white border-none text-sm font-light py-2.5 px-5 rounded-full cursor-pointer transition-all shadow-lg'
+          >
+            Exit Group
+          </button>
+        </div>
+      ) : (
         <div className='absolute bottom-5 left-0 right-0 px-5'>
           <button 
             onClick={() => logout()} 

@@ -14,13 +14,15 @@ import {
     removeparticipant,
     deletemessage,
     editmessage,
-    forwardmessage
+    forwardmessage,
+    getrecentchats
 } from "../controllers/messagecontroller.js"; // ✅ Added .js and fixed function name
 
 const messagerouter = express.Router();
 
 // User-related routes
 messagerouter.get('/users', protectroute, getuserforsidebar);
+messagerouter.get('/recent', protectroute, getrecentchats);
 
 // Group routes (must come before /:id routes)
 messagerouter.post('/groups/create', protectroute, creategroup);
