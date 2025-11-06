@@ -6,11 +6,19 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
   const [facingMode, setFacingMode] = useState('user') // 'user' for front, 'environment' for back
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [useFileInput, setUseFileInput] = useState(false) // Fallback to file input for APK
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   // Detect if running on mobile device
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  
+  // Detect if running in WebView/APK (common indicators)
+  const isWebView = window.navigator.standalone || 
+                    window.matchMedia('(display-mode: standalone)').matches ||
+                    /wv|WebView/i.test(navigator.userAgent) ||
+                    !window.chrome
 
   // Set mobile-specific video attributes
   useEffect(() => {
@@ -28,6 +36,14 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
   // Start camera when modal opens and video element is ready
   useEffect(() => {
     if (isOpen) {
+      // For WebView/APK, use file input fallback
+      if (isWebView) {
+        console.log('📱 WebView detected, using file input fallback')
+        setUseFileInput(true)
+        setIsLoading(false)
+        return
+      }
+      
       // Request fullscreen on mobile for better UX
       if (isMobile && document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().catch(() => {
@@ -65,6 +81,7 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
       }
     } else {
       stopCamera()
+      setUseFileInput(false)
       // Exit fullscreen when closing
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {
@@ -272,12 +289,57 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
           return
         } catch (fallbackError) {
           console.error('Fallback camera access failed:', fallbackError)
-          errorMessage = 'Unable to access camera with any settings.'
+          // If getUserMedia fails, fall back to file input for APK
+          console.log('📱 Falling back to file input method')
+          setUseFileInput(true)
+          setIsLoading(false)
+          setError(null)
+          return
         }
+      } else {
+        // For other errors, try file input fallback
+        console.log('📱 getUserMedia failed, falling back to file input method')
+        setUseFileInput(true)
+        setIsLoading(false)
+        setError(null)
+        return
       }
       
       toast.error(errorMessage)
       // Don't close immediately, let user see the error
+    }
+  }
+  
+  // Handle file input for APK/WebView fallback
+  const handleFileInput = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file')
+      return
+    }
+    
+    // Read file as base64
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      onCapture(reader.result)
+      onClose()
+    }
+    reader.onerror = () => {
+      toast.error('Failed to read image file')
+    }
+    reader.readAsDataURL(file)
+    
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+  
+  const handleCameraButtonClick = () => {
+    if (useFileInput && fileInputRef.current) {
+      fileInputRef.current.click()
     }
   }
 
@@ -341,6 +403,57 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
   }
 
   if (!isOpen) return null
+
+  // If using file input fallback (APK/WebView)
+  if (useFileInput) {
+    return (
+      <div className="fixed inset-0 bg-black z-[9999] flex items-center justify-center">
+        <div className="relative w-full h-full flex flex-col items-center justify-center p-6">
+          <div className="bg-gray-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700/50 w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-white text-xl font-semibold">Take Photo</h2>
+              <button
+                onClick={onClose}
+                className="text-white hover:text-gray-300 transition-colors text-3xl leading-none w-10 h-10 flex items-center justify-center"
+                aria-label="Close camera"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="flex flex-col items-center gap-6">
+              <div className="w-32 h-32 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg">
+                <svg className="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              
+              <p className="text-gray-300 text-center">
+                Tap the button below to open your camera
+              </p>
+              
+              <button
+                onClick={handleCameraButtonClick}
+                className="w-full px-6 py-4 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg hover:from-violet-600 hover:to-purple-700 transition-all font-medium shadow-lg"
+              >
+                Open Camera
+              </button>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileInput}
+                className="hidden"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 bg-black z-[9999] flex items-center justify-center">
