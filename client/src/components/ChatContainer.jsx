@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react'
 import assets from '../assets/assets'
-import { formatMessageTime, formatLastSeen, formatMessageDate } from '../libs/utils'
+import { formatMessageTime, formatMessageDate } from '../libs/utils'
 import { chatContext } from '../../context/chatcontext'
 import { authcontext } from '../../context/authcontext'
 import { useContext } from 'react'
@@ -388,7 +388,7 @@ const ChatContainer = () => {
               {onlineUsers.includes(selectedUser._id) || onlineUsers.includes(selectedUser.uid) || onlineUsers.includes(selectedUser.id) ? (
                 <span className="text-green-400">online</span>
               ) : (
-                <span>last seen {formatLastSeen(selectedUser.lastSeen || selectedUser.lastActive)}</span>
+                <span className="text-gray-500">offline</span>
               )}
             </p>
           )}

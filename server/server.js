@@ -13,7 +13,7 @@ dotenv.config({ path: join(__serverDir, ".env") });
 import http from "http";
 import userrouter from "./routes/userroute.js";
 import { Server } from "socket.io";
-import { initializeFirebase, db, admin } from "./lib/firebase.js"; // Import Firebase initializer
+import { initializeFirebase } from "./lib/firebase.js"; // Import Firebase initializer
 import messagerouter from "./routes/messageroute.js";
 
 const app = express();
@@ -154,8 +154,6 @@ io.on("connection", (socket) => {
         usersocketmap[userId] = socket.id;
         console.log("📊 Current online users:", Object.keys(usersocketmap));
         
-        // Clear lastSeen when user comes online (optional - we can keep it for "last active" tracking)
-        // For now, we'll keep lastSeen and just show "online" if they're in the onlineUsers list
         
         // Broadcast to ALL connected clients
         io.emit("getonlineusers", Object.keys(usersocketmap));
@@ -248,19 +246,9 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("disconnect", async () => {
+    socket.on("disconnect", () => {
         console.log("🔴 User disconnected - User ID:", userId);
         if (userId) {
-            // Update last seen timestamp in database
-            try {
-                await db.ref(`users/${userId}`).update({
-                    lastSeen: admin.database.ServerValue.TIMESTAMP
-                });
-                console.log("✅ Updated last seen for user:", userId);
-            } catch (error) {
-                console.error("❌ Error updating last seen:", error);
-            }
-            
             delete usersocketmap[userId];
             console.log("📊 Remaining online users:", Object.keys(usersocketmap));
             io.emit("getonlineusers", Object.keys(usersocketmap));
