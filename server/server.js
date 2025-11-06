@@ -34,17 +34,24 @@ app.use(cors({
         // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         
-        // Allow Render and Vercel URLs
+        // Allow Render and Vercel URLs (including all subdomains)
         if (origin.includes('onrender.com') || 
             origin.includes('vercel.app') || 
+            origin.includes('netlify.app') ||
             allowedOrigins.indexOf(origin) !== -1 || 
             origin.includes('localhost')) {
             callback(null, true);
         } else {
+            console.log('❌ CORS blocked origin:', origin);
             callback(new Error('Not allowed by CORS'));
         }
     },
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    exposedHeaders: ['Content-Type', 'Authorization'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 
 // Body parser middleware
@@ -109,17 +116,20 @@ export const io = new Server(server, {
             // Allow requests with no origin
             if (!origin) return callback(null, true);
             
-            // Allow Render and Vercel URLs and configured origins
+            // Allow Render, Vercel, and Netlify URLs (including all subdomains)
             if (origin.includes('onrender.com') || 
                 origin.includes('vercel.app') || 
+                origin.includes('netlify.app') ||
                 socketOrigins.indexOf(origin) !== -1 || 
                 origin.includes('localhost')) {
                 callback(null, true);
             } else {
+                console.log('❌ Socket.IO CORS blocked origin:', origin);
                 callback(new Error('Not allowed by CORS'));
             }
         },
-        credentials: true
+        credentials: true,
+        methods: ['GET', 'POST']
     }
 });
  
@@ -197,6 +207,30 @@ io.on("connection", (socket) => {
                     senderId
                 });
             }
+        }
+    });
+
+    // Message delivery confirmation
+    socket.on("messagedelivered", (data) => {
+        const { messageId, senderId } = data;
+        const senderSocketId = usersocketmap[senderId];
+        if (senderSocketId) {
+            io.to(senderSocketId).emit("messagedelivered", {
+                messageId,
+                delivered: true
+            });
+        }
+    });
+
+    // Message read confirmation
+    socket.on("messageread", (data) => {
+        const { messageId, senderId } = data;
+        const senderSocketId = usersocketmap[senderId];
+        if (senderSocketId) {
+            io.to(senderSocketId).emit("messageread", {
+                messageId,
+                read: true
+            });
         }
     });
 

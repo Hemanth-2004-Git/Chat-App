@@ -501,9 +501,17 @@ export const ChatProvider = ({ children }) => {
                 });
                 
                 // Mark as seen if we're viewing this chat
-                if (senderId !== currentUserId) {
-                    axios.put(`/messages/mark/${newMessage.senderId}`).catch(console.error);
+            if (senderId !== currentUserId) {
+                axios.put(`/messages/mark/${newMessage.senderId}`).catch(console.error);
+                
+                // Emit delivery confirmation
+                if (socket && newMessage._id) {
+                    socket.emit("messagedelivered", {
+                        messageId: newMessage._id,
+                        senderId: newMessage.senderId
+                    });
                 }
+            }
                 
                 setUnseenMessages(prev => ({
                     ...prev,
@@ -637,6 +645,37 @@ export const ChatProvider = ({ children }) => {
             };
 
             socket.on("newmessage", handleNewMessage);
+            
+            // Handle delivery confirmation
+            const handleMessageDelivered = (data) => {
+                const { messageId, delivered } = data;
+                if (delivered) {
+                    setMessages(prev => prev.map(msg => {
+                        const msgId = msg._id || msg.id;
+                        if (msgId === messageId) {
+                            return { ...msg, delivered: true };
+                        }
+                        return msg;
+                    }));
+                }
+            };
+            
+            // Handle read confirmation
+            const handleMessageRead = (data) => {
+                const { messageId, read } = data;
+                if (read) {
+                    setMessages(prev => prev.map(msg => {
+                        const msgId = msg._id || msg.id;
+                        if (msgId === messageId) {
+                            return { ...msg, seen: true, delivered: true };
+                        }
+                        return msg;
+                    }));
+                }
+            };
+            
+            socket.on("messagedelivered", handleMessageDelivered);
+            socket.on("messageread", handleMessageRead);
             socket.on("newgroupmessage", handleNewGroupMessage);
             socket.on("messagedeleted", handleMessageDeleted);
             socket.on("messageedited", handleMessageEdited);
@@ -647,6 +686,8 @@ export const ChatProvider = ({ children }) => {
                 socket.off("newgroupmessage", handleNewGroupMessage);
                 socket.off("messagedeleted", handleMessageDeleted);
                 socket.off("messageedited", handleMessageEdited);
+                socket.off("messagedelivered", handleMessageDelivered);
+                socket.off("messageread", handleMessageRead);
             };
     }, [socket, selectedUser, axios, getRecentChats]);
 

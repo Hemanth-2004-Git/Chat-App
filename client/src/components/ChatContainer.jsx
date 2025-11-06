@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react'
 import assets from '../assets/assets'
-import { formatMessageTime } from '../libs/utils'
+import { formatMessageTime, formatLastSeen, formatMessageDate } from '../libs/utils'
 import { chatContext } from '../../context/chatcontext'
 import { authcontext } from '../../context/authcontext'
 import { useContext } from 'react'
@@ -376,13 +376,28 @@ const ChatContainer = () => {
       {/* Header */}
         <div className='flex items-center gap-3 py-3 mx-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm'>
         <img src={selectedUser.profilePic || assets.avatar_icon} alt="" className="w-8 rounded-full"/>
-        <p className='flex-1 text-lg text-white flex items-center gap-2'>
-          {selectedUser.fullName}
-          {!selectedUser.isGroup && (onlineUsers.includes(selectedUser._id) ? 
-            <span className="w-2 h-2 rounded-full bg-green-500"></span> : 
-            <span className="w-2 h-2 rounded-full bg-red-500"></span>
+        <div className='flex-1 min-w-0'>
+          <p className='text-lg text-white flex items-center gap-2'>
+            {selectedUser.fullName}
+            {!selectedUser.isGroup && onlineUsers.includes(selectedUser._id) && (
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            )}
+          </p>
+          {!selectedUser.isGroup && (
+            <p className='text-xs text-gray-400'>
+              {onlineUsers.includes(selectedUser._id) || onlineUsers.includes(selectedUser.uid) || onlineUsers.includes(selectedUser.id) ? (
+                <span className="text-green-400">online</span>
+              ) : (
+                <span>last seen {formatLastSeen(selectedUser.lastSeen || selectedUser.lastActive)}</span>
+              )}
+            </p>
           )}
-        </p>
+          {selectedUser.isGroup && (
+            <p className='text-xs text-gray-400'>
+              {selectedUser.members?.length || 0} participants
+            </p>
+          )}
+        </div>
         <img 
           onClick={() => setSelectedUser(null)} 
           src={assets.arrow_icon} 
@@ -424,7 +439,23 @@ const ChatContainer = () => {
           const messageText = msg.text || ''
           const messageImage = msg.image
           const messageTime = msg.createdAt ? formatMessageTime(msg.createdAt) : (msg.timestamp ? formatMessageTime(msg.timestamp) : '')
+          const messageDate = msg.createdAt || msg.timestamp
           const senderName = isGroup && !isOwnMessage ? (msg.senderName || 'Unknown') : null
+          
+          // Check if we need to show a date separator
+          const showDateSeparator = (() => {
+            if (index === 0) return true; // Always show date for first message
+            const prevMsg = messages[index - 1];
+            if (!prevMsg) return false;
+            
+            const prevDate = prevMsg.createdAt || prevMsg.timestamp;
+            if (!prevDate || !messageDate) return false;
+            
+            const prevDateOnly = new Date(prevDate).toDateString();
+            const currentDateOnly = new Date(messageDate).toDateString();
+            
+            return prevDateOnly !== currentDateOnly;
+          })();
 
           // Click on message to reply (not just from menu)
           const handleMessageClick = () => {
@@ -484,8 +515,17 @@ const ChatContainer = () => {
               }
 
           return (
+            <React.Fragment key={msg._id || msg.id || index}>
+              {/* Date Separator */}
+              {showDateSeparator && (
+                <div className="flex items-center justify-center my-4">
+                  <div className="bg-gray-700/50 px-3 py-1 rounded-full">
+                    <span className="text-xs text-gray-300">{formatMessageDate(messageDate)}</span>
+                  </div>
+                </div>
+              )}
+              
             <div 
-                  key={msg._id || msg.id || index} 
                   className={`flex items-end gap-2 w-full mb-2 ${isOwnMessage ? 'justify-end' : 'justify-start'} relative group`}
                   onMouseEnter={() => setHoveredMessageId(msg._id || msg.id)}
                   onMouseLeave={() => !showDeleteMenu && setHoveredMessageId(null)}
@@ -799,27 +839,34 @@ const ChatContainer = () => {
                         <span className='text-xs ml-1 flex items-center'>
                           {msg.isSending ? (
                             <span className='inline-block w-3 h-3 border-2 border-white/50 border-t-white rounded-full animate-spin'></span>
-                          ) : (
-                            <>
-                              {msg.seen ? (
-                                // Double blue check - Read (WhatsApp style)
-                                <span className="flex items-center" title="Read">
-                                  <svg className="w-4 h-4 text-blue-400" viewBox="0 0 16 15" fill="none">
-                                    <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
-                                  </svg>
-                                </span>
-                              ) : (
-                                // Double gray check - Delivered (WhatsApp style)
-                                <span className="flex items-center" title="Delivered">
-                                  <svg className="w-4 h-4 text-gray-400" viewBox="0 0 16 15" fill="none">
-                                    <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
-                                  </svg>
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </span>
-                      )}
+        ) : (
+          <>
+            {msg.seen ? (
+              // Double blue check - Read (WhatsApp style)
+              <span className="flex items-center" title="Read">
+                <svg className="w-4 h-4 text-blue-400" viewBox="0 0 16 15" fill="none">
+                  <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
+                </svg>
+              </span>
+            ) : msg.delivered ? (
+              // Double gray check - Delivered (WhatsApp style)
+              <span className="flex items-center" title="Delivered">
+                <svg className="w-4 h-4 text-gray-400" viewBox="0 0 16 15" fill="none">
+                  <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
+                </svg>
+              </span>
+            ) : (
+              // Single gray check - Sent (WhatsApp style)
+              <span className="flex items-center" title="Sent">
+                <svg className="w-4 h-4 text-gray-400" viewBox="0 0 16 15" fill="none">
+                  <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512z" fill="currentColor"/>
+                </svg>
+              </span>
+            )}
+          </>
+        )}
+                      </span>
+                    )}
                     </div>
                   </div>
                   </div>
@@ -835,6 +882,7 @@ const ChatContainer = () => {
                 />
               )}
             </div>
+            </React.Fragment>
           )
         }) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
