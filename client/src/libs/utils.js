@@ -10,7 +10,23 @@ export function formatLastSeen(date) {
     if (!date) return 'Never';
     
     const now = new Date();
-    const lastSeen = new Date(date);
+    let lastSeen;
+    
+    // Handle Firebase timestamp (number) or ISO string
+    if (typeof date === 'number') {
+        // Firebase timestamp is in milliseconds
+        lastSeen = new Date(date);
+    } else if (typeof date === 'string') {
+        lastSeen = new Date(date);
+    } else {
+        return 'Never';
+    }
+    
+    // Check if date is valid
+    if (isNaN(lastSeen.getTime())) {
+        return 'Never';
+    }
+    
     const diffMs = now - lastSeen;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
