@@ -5,6 +5,7 @@ import { chatContext } from '../../context/chatcontext'
 import { authcontext } from '../../context/authcontext'
 import { useContext } from 'react'
 import { toast } from 'react-hot-toast'
+import { useNavigate } from 'react-router-dom'
 import ForwardMessageModal from './ForwardMessageModal'
 import ImageViewerModal from './ImageViewerModal'
 import EmojiPicker from './EmojiPicker'
@@ -12,7 +13,8 @@ import CameraModal from './CameraModal'
 
 const ChatContainer = () => {
   const {messages, selectedUser, setSelectedUser, sendMessage, getMessages, users, deleteMessage, editMessage, forwardMessage, loadingMessages} = useContext(chatContext)
-  const {authuser, onlineUsers} = useContext(authcontext)
+  const {authuser, onlineUsers, logout} = useContext(authcontext)
+  const navigate = useNavigate()
 
   const scrollEnd = useRef()
   const inputAreaRef = useRef()
