@@ -29,17 +29,22 @@ const allowedOrigins = process.env.FRONTEND_URL
     ? [process.env.FRONTEND_URL]
     : ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://localhost:5175"];
 
-app.use(cors({
+// Enhanced CORS configuration
+const corsOptions = {
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+        if (!origin) {
+            console.log('✅ CORS: Allowing request with no origin');
+            return callback(null, true);
+        }
         
-        // Allow Render and Vercel URLs (including all subdomains)
+        // Allow Render, Vercel, and Netlify URLs (including all subdomains)
         if (origin.includes('onrender.com') || 
             origin.includes('vercel.app') || 
             origin.includes('netlify.app') ||
             allowedOrigins.indexOf(origin) !== -1 || 
             origin.includes('localhost')) {
+            console.log('✅ CORS: Allowing origin:', origin);
             callback(null, true);
         } else {
             console.log('❌ CORS blocked origin:', origin);
@@ -48,11 +53,13 @@ app.use(cors({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers'],
     exposedHeaders: ['Content-Type', 'Authorization'],
     preflightContinue: false,
     optionsSuccessStatus: 204
-}));
+};
+
+app.use(cors(corsOptions));
 
 // Body parser middleware
 app.use(express.json({ limit: "10mb" }));
@@ -66,10 +73,36 @@ app.get('/favicon.ico', (req, res) => {
 // Request logging middleware
 app.use((req, res, next) => {
     console.log(`📍 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+    console.log(`🌐 Origin: ${req.headers.origin || 'No origin'}`);
     if (req.method === 'POST' || req.method === 'PUT') {
         console.log('📦 Request body:', req.body);
     }
     next();
+});
+
+// Explicit OPTIONS handler for all routes (must be after CORS middleware)
+app.options('*', (req, res) => {
+    const origin = req.headers.origin;
+    console.log('🔄 Handling OPTIONS preflight request for:', req.url, 'Origin:', origin);
+    
+    // Validate origin using same logic as CORS
+    if (!origin || 
+        origin.includes('onrender.com') || 
+        origin.includes('vercel.app') || 
+        origin.includes('netlify.app') ||
+        allowedOrigins.indexOf(origin) !== -1 || 
+        origin.includes('localhost')) {
+        res.header('Access-Control-Allow-Origin', origin || '*');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.header('Access-Control-Max-Age', '86400'); // 24 hours
+        console.log('✅ OPTIONS preflight allowed for origin:', origin);
+        res.status(204).end();
+    } else {
+        console.log('❌ OPTIONS preflight blocked for origin:', origin);
+        res.status(403).end();
+    }
 });
 
 // Test route
