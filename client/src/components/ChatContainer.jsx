@@ -9,7 +9,7 @@ import ForwardMessageModal from './ForwardMessageModal'
 import ImageViewerModal from './ImageViewerModal'
 
 const ChatContainer = () => {
-  const {messages, selectedUser, setSelectedUser, sendMessage, getMessages, users, deleteMessage, editMessage, forwardMessage} = useContext(chatContext)
+  const {messages, selectedUser, setSelectedUser, sendMessage, getMessages, users, deleteMessage, editMessage, forwardMessage, loadingMessages} = useContext(chatContext)
   const {authuser, onlineUsers} = useContext(authcontext)
 
   const scrollEnd = useRef()
@@ -162,6 +162,7 @@ const ChatContainer = () => {
   useEffect(() => {
     if(selectedUser && selectedUser._id) {
       const isGroup = selectedUser.isGroup === true;
+      // Messages are cleared automatically in getMessages for instant feedback
       getMessages(selectedUser._id, isGroup)
     }
   }, [selectedUser])
@@ -229,7 +230,7 @@ const ChatContainer = () => {
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed'
+        backgroundAttachment: 'scroll'
       }}
     >
       {/* Overlay for better readability */}
@@ -267,7 +268,14 @@ const ChatContainer = () => {
 
         {/* Messages - WhatsApp Style */}
         <div className='flex flex-col h-[calc(100%-120px)] overflow-y-auto px-4 py-2 gap-1'>
-        {messages && messages.length > 0 ? messages.map((msg, index) => {
+        {loadingMessages && messages.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 text-gray-400">
+              <div className="w-8 h-8 border-4 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-sm">Loading messages...</p>
+            </div>
+          </div>
+        ) : messages && messages.length > 0 ? messages.map((msg, index) => {
           // SAFE CHECK: Ensure message has required properties
           if (!msg || typeof msg !== 'object') return null
           

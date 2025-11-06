@@ -26,11 +26,13 @@ const Sidebar = () => {
     }, []); // Empty dependency array
 
     // ✅ Safe filtering with fallbacks
-    const filteredUsers = input 
+    // Change: Do not show all users by default; only show when searching
+    const trimmedQuery = (input || '').trim().toLowerCase();
+    const filteredUsers = trimmedQuery
         ? (users || []).filter((user) => 
-            user?.fullName?.toLowerCase().includes(input.toLowerCase())
+            user?.fullName?.toLowerCase().includes(trimmedQuery)
           ) 
-        : (users || []);
+        : [];
 
     // ✅ Don't show current user in the list with safe filtering
     // Check both _id and uid to handle different user object structures
@@ -189,9 +191,9 @@ const Sidebar = () => {
                     })
                 ) : (
                     <div className="text-center text-gray-400 py-8">
-                        <p>No users found</p>
+                        <p>{trimmedQuery ? 'No users found' : 'Search to start a chat'}</p>
                         <p className="text-sm mt-1">
-                            {input ? 'Try a different search' : 'Start chatting with others'}
+                            {trimmedQuery ? 'Try a different name' : 'Type a name above to find someone'}
                         </p>
                     </div>
                 )}

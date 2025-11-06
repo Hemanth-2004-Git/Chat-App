@@ -38,8 +38,9 @@ const LoginPage = () => {
       // will handle fetching user data and setting the user state.
       console.log("Firebase login successful:", userCredential.user.uid);
       
-      toast.success("Logged in successfully!");
+      // ✅ Navigate immediately for faster UX - auth context will handle the rest
       navigate("/");
+      toast.success("Logged in successfully!");
     } catch (err: any) {
       console.error("Firebase login error:", err);
       let errorMessage = "Failed to log in.";
@@ -86,8 +87,9 @@ const LoginPage = () => {
           });
         }
         
-        toast.success("Signed in with Google successfully!");
+        // ✅ Navigate immediately for faster UX
         navigate("/");
+        toast.success("Signed in with Google successfully!");
       } catch (dbError: any) {
         console.error("Database error:", dbError);
         console.error("Error details:", dbError.response?.data || dbError.message);

@@ -166,12 +166,13 @@ const AvatarCreator = ({ isOpen, onClose, onSave, currentProfilePic }) => {
           event.origin === origin
         )
         
-        // Log ALL messages for debugging
+        // Log ALL messages for debugging (even from invalid origins for troubleshooting)
         if (event.data && typeof event.data === 'object') {
           console.log('📨 Message received from:', event.origin, 'Data:', JSON.stringify(event.data, null, 2))
         }
 
         if (!isValidOrigin) {
+          console.warn('⚠️ Message from invalid origin ignored:', event.origin)
           return
         }
 
@@ -187,7 +188,21 @@ const AvatarCreator = ({ isOpen, onClose, onSave, currentProfilePic }) => {
                                        data.eventName?.startsWith('v1.') ||
                                        data.eventName?.includes('avatar') ||
                                        data.eventName?.includes('frame') ||
-                                       data.eventName?.includes('user')
+                                       data.eventName?.includes('user') ||
+                                       data.type === 'rpm-frame-init' ||
+                                       event.origin.includes('readyplayer.me')
+        
+        // Log non-RPM messages for debugging
+        if (!isReadyPlayerMeMessage && data && typeof data === 'object') {
+          console.log('📋 Non-RPM message format from Ready Player Me origin:', {
+            origin: event.origin,
+            dataKeys: Object.keys(data),
+            hasEventName: !!data.eventName,
+            hasSource: !!data.source,
+            dataType: typeof data,
+            dataPreview: JSON.stringify(data).substring(0, 200)
+          })
+        }
         
         if (isReadyPlayerMeMessage) {
           console.log('✅ Ready Player Me message received:', data)

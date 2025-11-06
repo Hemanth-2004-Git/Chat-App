@@ -10,6 +10,8 @@ export const ChatProvider = ({ children }) => {
     const [users, setUsers] = useState([]);
     const [unseenMessages, setUnseenMessages] = useState({});
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingMessages, setLoadingMessages] = useState(false);
+    const messagesCache = useRef({}); // Cache messages by userId
 
     const { socket, axios, onlineUsers, user, auth } = useContext(authcontext);
 
@@ -109,11 +111,28 @@ export const ChatProvider = ({ children }) => {
     }, [axios, isLoading, user, auth]);
 
     const getMessages = async (userId, isGroup = false) => {
+        if (!userId) return;
+        
+        const cacheKey = `${userId}_${isGroup ? 'group' : 'user'}`;
+        
+        // ✅ INSTANT FEEDBACK: Clear messages immediately and show cached if available
+        setMessages([]);
+        setLoadingMessages(true);
+        
+        // Check cache first for instant display
+        if (messagesCache.current[cacheKey]) {
+            setMessages(messagesCache.current[cacheKey]);
+            setLoadingMessages(false);
+        }
+        
         try {
             const endpoint = isGroup ? `/messages/groups/${userId}` : `/messages/${userId}`;
             const { data } = await axios.get(endpoint);
             if (data.success) {
-                setMessages(data.messages || []);
+                const fetchedMessages = data.messages || [];
+                setMessages(fetchedMessages);
+                // Cache messages for instant loading next time
+                messagesCache.current[cacheKey] = fetchedMessages;
                 // Reset unseen count for this user/group when opening chat
                 setUnseenMessages(prev => ({
                     ...prev,
@@ -123,6 +142,8 @@ export const ChatProvider = ({ children }) => {
         } catch (error) {
             console.error("Error fetching messages:", error);
             toast.error(error.response?.data?.message || "Failed to load messages");
+        } finally {
+            setLoadingMessages(false);
         }
     };
 
@@ -161,7 +182,13 @@ export const ChatProvider = ({ children }) => {
                 }
                 
                 // Add message immediately to UI
-                setMessages(prev => [...prev, tempMessage]);
+                setMessages(prev => {
+                    const updated = [...prev, tempMessage];
+                    // ✅ Update cache
+                    const cacheKey = isGroup ? `${selectedUser._id}_group` : `${selectedUser._id}_user`;
+                    messagesCache.current[cacheKey] = updated;
+                    return updated;
+                });
                 
                 try {
                     const endpoint = isGroup 
@@ -176,23 +203,27 @@ export const ChatProvider = ({ children }) => {
                         
                         // Replace temporary message with real one using ID matching
                         setMessages(prev => {
+                            let updated;
                             // First try to replace by temp ID
                             const tempIndex = prev.findIndex(msg => msg._id === tempMessage._id);
                             if (tempIndex >= 0) {
-                                const updated = [...prev];
+                                updated = [...prev];
                                 updated[tempIndex] = { ...newMsg, isSending: false };
-                                return updated;
-                            }
-                            // If temp message not found, check if real message already exists (socket might have added it)
-                            const existsIndex = prev.findIndex(msg => msg._id === newMsg._id);
-                            if (existsIndex >= 0) {
-                                // Already exists, just update the sending flag
-                                const updated = [...prev];
+                            } else if (prev.findIndex(msg => msg._id === newMsg._id) >= 0) {
+                                // If temp message not found, check if real message already exists (socket might have added it)
+                                const existsIndex = prev.findIndex(msg => msg._id === newMsg._id);
+                                updated = [...prev];
                                 updated[existsIndex] = { ...updated[existsIndex], isSending: false };
-                                return updated;
+                            } else {
+                                // Neither found, add it (shouldn't happen but safety check)
+                                updated = [...prev, { ...newMsg, isSending: false }];
                             }
-                            // Neither found, add it (shouldn't happen but safety check)
-                            return [...prev, { ...newMsg, isSending: false }];
+                            
+                            // ✅ Update cache
+                            const cacheKey = isGroup ? `${selectedUser._id}_group` : `${selectedUser._id}_user`;
+                            messagesCache.current[cacheKey] = updated;
+                            
+                            return updated;
                         });
                         
                         // Don't emit socket events for group messages - server handles that
@@ -347,14 +378,20 @@ export const ChatProvider = ({ children }) => {
                         msg.text === newMessage.text
                     );
                     
+                    let updated;
                     if (optimisticIndex >= 0) {
-                        const updated = [...prev];
+                        updated = [...prev];
                         updated[optimisticIndex] = { ...newMessage, seen: true };
-                        return updated;
                     } else {
                         // Message doesn't exist and no optimistic message found - add it
-                        return [...prev, { ...newMessage, seen: true }];
+                        updated = [...prev, { ...newMessage, seen: true }];
                     }
+                    
+                    // ✅ Update cache
+                    const cacheKey = `${selectedUser._id}_user`;
+                    messagesCache.current[cacheKey] = updated;
+                    
+                    return updated;
                 });
                 
                 axios.put(`/messages/mark/${newMessage.senderId}`).catch(console.error);
@@ -397,17 +434,23 @@ export const ChatProvider = ({ children }) => {
                             return sameSender && sameGroup && sameText && sameImage;
                         });
                         
+                        let updated;
                         if (optimisticIndex >= 0) {
                             // Replace optimistic message with real one
-                            const updated = [...prev];
+                            updated = [...prev];
                             updated[optimisticIndex] = { ...newMessage, seen: true, isSending: false };
                             console.log("✅ Replaced optimistic group message with real one");
-                            return updated;
                         } else {
                             // No optimistic message found - add the new message
                             console.log("➕ Adding new group message from socket");
-                            return [...prev, { ...newMessage, seen: true }];
+                            updated = [...prev, { ...newMessage, seen: true }];
                         }
+                        
+                        // ✅ Update cache
+                        const cacheKey = `${selectedUser._id}_group`;
+                        messagesCache.current[cacheKey] = updated;
+                        
+                        return updated;
                     });
                     
                     setUnseenMessages(prev => ({
@@ -550,11 +593,18 @@ export const ChatProvider = ({ children }) => {
             }
         };
 
+        // ✅ Optimized setSelectedUser - clear messages immediately
+        const handleSetSelectedUser = (user) => {
+            // Clear messages immediately for instant feedback
+            setMessages([]);
+            setSelectedUser(user);
+        };
+
         const value = {
             messages,
             setMessages,
             selectedUser,
-            setSelectedUser,
+            setSelectedUser: handleSetSelectedUser,
             users,
             unseenMessages,
             setUnseenMessages,
@@ -564,7 +614,8 @@ export const ChatProvider = ({ children }) => {
             deleteMessage,
             editMessage,
             forwardMessage,
-            isLoading
+            isLoading,
+            loadingMessages
         };
 
     return (
