@@ -145,6 +145,61 @@ io.on("connection", (socket) => {
         }
     });
 
+    // Typing indicators
+    socket.on("typing", (data) => {
+        const { receiverId, isGroup, senderId } = data;
+        
+        if (isGroup) {
+            // For groups, emit to all members except sender
+            const groupMembers = Object.keys(usersocketmap).filter(id => id !== senderId);
+            groupMembers.forEach(memberId => {
+                const memberSocketId = usersocketmap[memberId];
+                if (memberSocketId) {
+                    io.to(memberSocketId).emit("usertyping", {
+                        senderId,
+                        senderName: data.senderName || 'Someone',
+                        groupId: receiverId
+                    });
+                }
+            });
+        } else {
+            // For direct messages, emit to receiver
+            const receiverSocketId = usersocketmap[receiverId];
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("usertyping", {
+                    senderId,
+                    senderName: data.senderName || 'Someone'
+                });
+            }
+        }
+    });
+
+    socket.on("stoptyping", (data) => {
+        const { receiverId, isGroup, senderId } = data;
+        
+        if (isGroup) {
+            // For groups, emit to all members except sender
+            const groupMembers = Object.keys(usersocketmap).filter(id => id !== senderId);
+            groupMembers.forEach(memberId => {
+                const memberSocketId = usersocketmap[memberId];
+                if (memberSocketId) {
+                    io.to(memberSocketId).emit("userstoptyping", {
+                        senderId,
+                        groupId: receiverId
+                    });
+                }
+            });
+        } else {
+            // For direct messages, emit to receiver
+            const receiverSocketId = usersocketmap[receiverId];
+            if (receiverSocketId) {
+                io.to(receiverSocketId).emit("userstoptyping", {
+                    senderId
+                });
+            }
+        }
+    });
+
     socket.on("disconnect", () => {
         console.log("🔴 User disconnected - User ID:", userId);
         if (userId) {

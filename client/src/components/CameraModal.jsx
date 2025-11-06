@@ -25,6 +25,7 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
     }
   }, [isMobile, isOpen])
 
+  // Start camera when modal opens and video element is ready
   useEffect(() => {
     if (isOpen) {
       // Request fullscreen on mobile for better UX
@@ -33,19 +34,38 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
           // Ignore fullscreen errors
         })
       }
-      startCamera()
+      
+      // Wait a bit for the video element to be rendered
+      const timer = setTimeout(() => {
+        if (videoRef.current) {
+          startCamera()
+        } else {
+          console.warn('Video element not ready, retrying...')
+          // Retry after a short delay
+          setTimeout(() => {
+            if (videoRef.current) {
+              startCamera()
+            } else {
+              console.error('Video element still not available')
+              setError(new Error('Video element not available'))
+              setIsLoading(false)
+            }
+          }, 100)
+        }
+      }, 50)
+
+      return () => {
+        clearTimeout(timer)
+        stopCamera()
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {
+            // Ignore fullscreen errors
+          })
+        }
+      }
     } else {
       stopCamera()
       // Exit fullscreen when closing
-      if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {
-          // Ignore fullscreen errors
-        })
-      }
-    }
-
-    return () => {
-      stopCamera()
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {
           // Ignore fullscreen errors
@@ -63,11 +83,31 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
       // Stop existing stream if any
       if (stream) {
         stream.getTracks().forEach(track => track.stop())
+        setStream(null)
+      }
+
+      // Check if running on HTTPS or localhost (required for camera access)
+      const isSecureContext = window.isSecureContext || 
+                               location.protocol === 'https:' || 
+                               location.hostname === 'localhost' || 
+                               location.hostname === '127.0.0.1'
+      
+      if (!isSecureContext) {
+        throw new Error('Camera requires HTTPS connection (or localhost)')
       }
 
       // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera API not supported in this browser')
+        // Try legacy API for older browsers
+        const getUserMedia = navigator.mediaDevices?.getUserMedia || 
+                            navigator.getUserMedia || 
+                            navigator.webkitGetUserMedia || 
+                            navigator.mozGetUserMedia || 
+                            navigator.msGetUserMedia
+        
+        if (!getUserMedia) {
+          throw new Error('Camera API not supported in this browser')
+        }
       }
 
       // Mobile-optimized constraints
@@ -83,23 +123,125 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
         audio: false
       }
 
+      console.log('Requesting camera access with constraints:', constraints)
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
+      console.log('Camera stream obtained:', mediaStream)
 
       setStream(mediaStream)
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream
-        // Wait for video to be ready
-        await new Promise((resolve) => {
-          if (videoRef.current) {
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current.play().then(resolve).catch(resolve)
-            }
-          } else {
-            resolve()
-          }
-        })
+      
+      // Wait for video element to be available
+      let retries = 0
+      const maxRetries = 10
+      while (!videoRef.current && retries < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        retries++
       }
+      
+      if (videoRef.current) {
+        const video = videoRef.current
+        console.log('Setting video srcObject')
+        video.srcObject = mediaStream
+        
+        // Wait for video to be ready and play
+        await new Promise((resolve, reject) => {
+          if (!video) {
+            reject(new Error('Video element not available'))
+            return
+          }
+          
+          let resolved = false
+          
+          const handleLoadedMetadata = () => {
+            if (resolved) return
+            console.log('Video metadata loaded, attempting to play...')
+            video.play()
+              .then(() => {
+                console.log('✅ Video playing successfully')
+                resolved = true
+                resolve()
+              })
+              .catch((playError) => {
+                console.warn('⚠️ Play promise rejected, but video might still work:', playError)
+                // Check if video is actually playing
+                setTimeout(() => {
+                  if (video.readyState >= 2 && !video.paused) {
+                    console.log('✅ Video is playing despite promise rejection')
+                    resolved = true
+                    resolve()
+                  } else {
+                    console.error('❌ Video failed to play')
+                    if (!resolved) {
+                      resolved = true
+                      reject(playError)
+                    }
+                  }
+                }, 500)
+              })
+          }
+
+          const handleCanPlay = () => {
+            if (resolved) return
+            console.log('Video can play, ensuring it plays...')
+            if (video.paused) {
+              video.play().catch(err => {
+                console.warn('Play on canplay failed:', err)
+              })
+            }
+          }
+
+          const handleError = (e) => {
+            console.error('❌ Video element error:', e)
+            if (!resolved) {
+              resolved = true
+              reject(new Error('Video failed to load'))
+            }
+          }
+
+          // Set up event listeners
+          video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+          video.addEventListener('canplay', handleCanPlay, { once: true })
+          video.addEventListener('error', handleError, { once: true })
+          
+          // Fallback timeout - if video is ready, try to play
+          setTimeout(() => {
+            if (!resolved && video.readyState >= 2) {
+              console.log('Fallback: Video ready, attempting play...')
+              video.play()
+                .then(() => {
+                  console.log('✅ Video playing via fallback')
+                  resolved = true
+                  resolve()
+                })
+                .catch(() => {
+                  // If video has data, consider it resolved
+                  if (video.readyState >= 2) {
+                    console.log('Video has data, considering ready')
+                    resolved = true
+                    resolve()
+                  } else if (!resolved) {
+                    resolved = true
+                    reject(new Error('Video timeout'))
+                  }
+                })
+            } else if (!resolved) {
+              console.warn('Video not ready after timeout')
+              if (video.readyState >= 1) {
+                // Video is loading, give it more time
+                resolved = true
+                resolve()
+              } else {
+                resolved = true
+                reject(new Error('Video timeout - not loading'))
+              }
+            }
+          }, 5000)
+        })
+      } else {
+        console.warn('⚠️ Video ref not available when setting stream')
+      }
+      
       setIsLoading(false)
+      setError(null)
     } catch (error) {
       console.error('Error accessing camera:', error)
       setIsLoading(false)
@@ -123,19 +265,19 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
           setStream(fallbackStream)
           if (videoRef.current) {
             videoRef.current.srcObject = fallbackStream
+            videoRef.current.play().catch(() => {})
           }
           setIsLoading(false)
+          setError(null)
           return
         } catch (fallbackError) {
+          console.error('Fallback camera access failed:', fallbackError)
           errorMessage = 'Unable to access camera with any settings.'
         }
       }
       
       toast.error(errorMessage)
       // Don't close immediately, let user see the error
-      setTimeout(() => {
-        onClose()
-      }, 2000)
     }
   }
 
@@ -218,48 +360,82 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
           </button>
         </div>
 
-        {/* Loading/Error State */}
-        {isLoading && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-              <p className="text-white">Starting camera...</p>
+        {/* Video Preview - Always render video element when modal is open */}
+        <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
+          {/* Always render video element so ref is available */}
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`w-full h-full object-cover ${isLoading || error ? 'opacity-0' : 'opacity-100'}`}
+            style={{
+              transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
+              WebkitTransform: facingMode === 'user' ? 'scaleX(-1)' : 'none'
+            }}
+            onLoadedMetadata={() => {
+              if (videoRef.current) {
+                videoRef.current.play().catch(err => {
+                  console.error('Auto-play prevented:', err)
+                })
+              }
+            }}
+            onCanPlay={() => {
+              if (videoRef.current && videoRef.current.paused) {
+                videoRef.current.play().catch(err => {
+                  console.error('Play error:', err)
+                })
+              }
+            }}
+          />
+          
+          {/* Loading overlay */}
+          {isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/80">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+                <p className="text-white">Starting camera...</p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {error && !isLoading && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center p-6">
-              <p className="text-red-400 mb-4">{error.message || 'Camera error occurred'}</p>
-              <button
-                onClick={startCamera}
-                className="px-6 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
-              >
-                Try Again
-              </button>
+          {/* Error overlay */}
+          {error && !isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/90">
+              <div className="text-center p-6 max-w-md">
+                <div className="mb-4">
+                  <svg className="w-16 h-16 text-red-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <p className="text-red-400 mb-2 font-semibold">{error.message || 'Camera error occurred'}</p>
+                  {error.name && (
+                    <p className="text-gray-400 text-sm">Error: {error.name}</p>
+                  )}
+                </div>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={startCamera}
+                    className="px-6 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    onClick={() => {
+                      stopCamera()
+                      onClose()
+                    }}
+                    className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* Video Preview */}
-        {!isLoading && !error && (
-          <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-              style={{
-                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
-                WebkitTransform: facingMode === 'user' ? 'scaleX(-1)' : 'none'
-              }}
-            />
+          )}
             
-            {/* Camera controls overlay */}
-            <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
-              <div className="flex items-center justify-center gap-4 sm:gap-6">
+          {/* Camera controls overlay */}
+          <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
+            <div className="flex items-center justify-center gap-4 sm:gap-6">
                 {/* Switch Camera Button */}
                 <button
                   onClick={switchCamera}
@@ -297,10 +473,9 @@ const CameraModal = ({ isOpen, onClose, onCapture }) => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
-              </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Hidden canvas for capturing */}
         <canvas ref={canvasRef} className="hidden" />

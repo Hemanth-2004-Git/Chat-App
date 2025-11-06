@@ -166,9 +166,10 @@ export const ChatProvider = ({ children }) => {
         setLoadingMessages(true);
         
         // Check cache first for instant display
-        if (messagesCache.current[cacheKey]) {
+        if (messagesCache.current[cacheKey] && messagesCache.current[cacheKey].length > 0) {
             setMessages(messagesCache.current[cacheKey]);
             setLoadingMessages(false);
+            console.log("✅ Showing cached messages:", messagesCache.current[cacheKey].length);
         }
         
         try {
@@ -176,14 +177,46 @@ export const ChatProvider = ({ children }) => {
             const { data } = await axios.get(endpoint);
             if (data.success) {
                 const fetchedMessages = data.messages || [];
-                setMessages(fetchedMessages);
-                // Cache messages for instant loading next time
-                messagesCache.current[cacheKey] = fetchedMessages;
+                
+                // ✅ Merge cached messages with fetched messages to ensure we have all real-time messages
+                const cachedMessages = messagesCache.current[cacheKey] || [];
+                
+                // Create a map of fetched messages by ID for quick lookup
+                const fetchedMap = new Map();
+                fetchedMessages.forEach(msg => {
+                    const msgId = msg._id || msg.id;
+                    if (msgId) fetchedMap.set(msgId, msg);
+                });
+                
+                // Merge: use fetched messages as base, but keep any cached messages that aren't in fetched
+                // This ensures real-time messages received while not viewing the chat are included
+                const mergedMessages = [...fetchedMessages];
+                cachedMessages.forEach(cachedMsg => {
+                    const cachedId = cachedMsg._id || cachedMsg.id;
+                    if (cachedId && !fetchedMap.has(cachedId)) {
+                        // This is a real-time message that hasn't been fetched yet - add it
+                        mergedMessages.push(cachedMsg);
+                    }
+                });
+                
+                // Sort by timestamp/createdAt
+                mergedMessages.sort((a, b) => {
+                    const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
+                    const timeB = new Date(b.createdAt || b.timestamp || 0).getTime();
+                    return timeA - timeB;
+                });
+                
+                setMessages(mergedMessages);
+                // Update cache with merged messages
+                messagesCache.current[cacheKey] = mergedMessages;
+                
                 // Reset unseen count for this user/group when opening chat
                 setUnseenMessages(prev => ({
                     ...prev,
                     [userId]: 0
                 }));
+                
+                console.log("✅ Messages loaded and merged. Fetched:", fetchedMessages.length, "Cached:", cachedMessages.length, "Merged:", mergedMessages.length);
             }
         } catch (error) {
             console.error("Error fetching messages:", error);
@@ -408,8 +441,33 @@ export const ChatProvider = ({ children }) => {
         const handleNewMessage = (newMessage) => {
             console.log("📩 New message received:", newMessage);
             
+            // Determine sender and receiver IDs
+            const senderId = newMessage.senderId;
+            const receiverId = newMessage.receiverId;
+            const currentUserId = user?._id || user?.uid;
+            
+            // Determine which chat this message belongs to
+            const chatUserId = senderId === currentUserId ? receiverId : senderId;
+            const cacheKey = `${chatUserId}_user`;
+            
+            // ✅ ALWAYS cache the message, even if not viewing that chat
+            if (messagesCache.current[cacheKey]) {
+                const cachedMessages = messagesCache.current[cacheKey];
+                // Check if message already exists
+                const existsById = cachedMessages.some(msg => msg._id === newMessage._id);
+                if (!existsById) {
+                    // Add to cache
+                    messagesCache.current[cacheKey] = [...cachedMessages, { ...newMessage, seen: senderId === currentUserId }];
+                    console.log("✅ Message cached for chat:", chatUserId);
+                }
+            } else {
+                // Initialize cache with this message
+                messagesCache.current[cacheKey] = [{ ...newMessage, seen: senderId === currentUserId }];
+                console.log("✅ Cache initialized with message for chat:", chatUserId);
+            }
+            
             // Handle regular messages
-            if (selectedUser && !selectedUser.isGroup && newMessage.senderId === selectedUser._id) {
+            if (selectedUser && !selectedUser.isGroup && chatUserId === selectedUser._id) {
                 // Message from selected user - add to current chat (may replace optimistic message)
                 setMessages(prev => {
                     // First check if message already exists by ID (prevents duplicates)
@@ -436,14 +494,16 @@ export const ChatProvider = ({ children }) => {
                         updated = [...prev, { ...newMessage, seen: true }];
                     }
                     
-                    // ✅ Update cache
-                    const cacheKey = `${selectedUser._id}_user`;
+                    // ✅ Update cache with the updated messages
                     messagesCache.current[cacheKey] = updated;
                     
                     return updated;
                 });
                 
-                axios.put(`/messages/mark/${newMessage.senderId}`).catch(console.error);
+                // Mark as seen if we're viewing this chat
+                if (senderId !== currentUserId) {
+                    axios.put(`/messages/mark/${newMessage.senderId}`).catch(console.error);
+                }
                 
                 setUnseenMessages(prev => ({
                     ...prev,
@@ -452,13 +512,15 @@ export const ChatProvider = ({ children }) => {
                 
                 // ✅ Refresh recent chats to update order
                 getRecentChats();
-            } else if (!selectedUser || !selectedUser.isGroup) {
-                // Message from another user - increment unseen count if not in current chat
-                setUnseenMessages(prev => ({
-                    ...prev,
-                    [newMessage.senderId]: (prev[newMessage.senderId] || 0) + 1
-                }));
-                // ✅ Refresh recent chats to update order when message received from another user
+            } else {
+                // Message from another user/chat - increment unseen count if not in current chat
+                if (senderId !== currentUserId) {
+                    setUnseenMessages(prev => ({
+                        ...prev,
+                        [chatUserId]: (prev[chatUserId] || 0) + 1
+                    }));
+                }
+                // ✅ Refresh recent chats to update order when message received
                 getRecentChats();
             }
         };
@@ -466,8 +528,28 @@ export const ChatProvider = ({ children }) => {
             const handleNewGroupMessage = (newMessage) => {
                 console.log("📩 New group message received:", newMessage);
                 
+                const groupId = newMessage.groupId;
+                const currentUserId = user?._id || user?.uid;
+                const cacheKey = `${groupId}_group`;
+                
+                // ✅ ALWAYS cache the message, even if not viewing that group
+                if (messagesCache.current[cacheKey]) {
+                    const cachedMessages = messagesCache.current[cacheKey];
+                    // Check if message already exists
+                    const existsById = cachedMessages.some(msg => msg._id === newMessage._id);
+                    if (!existsById) {
+                        // Add to cache
+                        messagesCache.current[cacheKey] = [...cachedMessages, { ...newMessage, seen: newMessage.senderId === currentUserId }];
+                        console.log("✅ Group message cached for group:", groupId);
+                    }
+                } else {
+                    // Initialize cache with this message
+                    messagesCache.current[cacheKey] = [{ ...newMessage, seen: newMessage.senderId === currentUserId }];
+                    console.log("✅ Cache initialized with group message for group:", groupId);
+                }
+                
                 // Handle group messages
-                if (selectedUser && selectedUser.isGroup && newMessage.groupId === selectedUser._id) {
+                if (selectedUser && selectedUser.isGroup && groupId === selectedUser._id) {
                     setMessages(prev => {
                         // First check if message already exists by ID (prevents duplicates)
                         const existsById = prev.some(msg => msg._id === newMessage._id);
@@ -500,8 +582,7 @@ export const ChatProvider = ({ children }) => {
                             updated = [...prev, { ...newMessage, seen: true }];
                         }
                         
-                        // ✅ Update cache
-                        const cacheKey = `${selectedUser._id}_group`;
+                        // ✅ Update cache with the updated messages
                         messagesCache.current[cacheKey] = updated;
                         
                         return updated;
@@ -516,10 +597,12 @@ export const ChatProvider = ({ children }) => {
                     getRecentChats();
                 } else {
                     // Group message from another group - increment unseen count
-                    setUnseenMessages(prev => ({
-                        ...prev,
-                        [newMessage.groupId]: (prev[newMessage.groupId] || 0) + 1
-                    }));
+                    if (newMessage.senderId !== currentUserId) {
+                        setUnseenMessages(prev => ({
+                            ...prev,
+                            [newMessage.groupId]: (prev[newMessage.groupId] || 0) + 1
+                        }));
+                    }
                     // ✅ Refresh recent chats to update order when message received from another group
                     getRecentChats();
                 }

@@ -13,7 +13,7 @@ import CameraModal from './CameraModal'
 
 const ChatContainer = () => {
   const {messages, selectedUser, setSelectedUser, sendMessage, getMessages, users, deleteMessage, editMessage, forwardMessage, loadingMessages} = useContext(chatContext)
-  const {authuser, onlineUsers, logout} = useContext(authcontext)
+  const {authuser, onlineUsers, logout, socket} = useContext(authcontext)
   const navigate = useNavigate()
 
   const scrollEnd = useRef()
@@ -28,12 +28,121 @@ const ChatContainer = () => {
   const [messagesToForward, setMessagesToForward] = useState([])
   const [viewingImage, setViewingImage] = useState(null)
   const [showCamera, setShowCamera] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
+  const [typingUsers, setTypingUsers] = useState([])
+  const typingTimeoutRef = useRef(null)
+
+  // Typing indicator logic
+  useEffect(() => {
+    if (!socket || !selectedUser || editingMessage) return;
+
+    const handleTyping = () => {
+      if (!isTyping) {
+        setIsTyping(true);
+        const receiverId = selectedUser._id || selectedUser.uid;
+        const isGroup = selectedUser.isGroup === true;
+        
+        socket.emit("typing", {
+          receiverId,
+          isGroup,
+          senderId: authuser?._id || authuser?.uid
+        });
+      }
+
+      // Clear existing timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+
+      // Stop typing indicator after 3 seconds of no typing
+      typingTimeoutRef.current = setTimeout(() => {
+        setIsTyping(false);
+        const receiverId = selectedUser._id || selectedUser.uid;
+        const isGroup = selectedUser.isGroup === true;
+        
+        socket.emit("stoptyping", {
+          receiverId,
+          isGroup,
+          senderId: authuser?._id || authuser?.uid
+        });
+      }, 3000);
+    };
+
+    if (input.trim()) {
+      handleTyping();
+    } else {
+      setIsTyping(false);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    }
+
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, [input, socket, selectedUser, isTyping, editingMessage, authuser]);
+
+  // Listen for typing events
+  useEffect(() => {
+    if (!socket || !selectedUser) return;
+
+    const handleUserTyping = (data) => {
+      const { senderId, senderName } = data;
+      const currentUserId = authuser?._id || authuser?.uid;
+      
+      // Don't show typing indicator for own messages
+      if (senderId === currentUserId) return;
+
+      setTypingUsers(prev => {
+        if (!prev.find(u => u.senderId === senderId)) {
+          return [...prev, { senderId, senderName: senderName || 'Someone' }];
+        }
+        return prev;
+      });
+
+      // Remove typing indicator after 5 seconds
+      setTimeout(() => {
+        setTypingUsers(prev => prev.filter(u => u.senderId !== senderId));
+      }, 5000);
+    };
+
+    const handleUserStopTyping = (data) => {
+      const { senderId } = data;
+      setTypingUsers(prev => prev.filter(u => u.senderId !== senderId));
+    };
+
+    socket.on("usertyping", handleUserTyping);
+    socket.on("userstoptyping", handleUserStopTyping);
+
+    return () => {
+      socket.off("usertyping", handleUserTyping);
+      socket.off("userstoptyping", handleUserStopTyping);
+      setTypingUsers([]);
+    };
+  }, [socket, selectedUser, authuser]);
 
   // Safe message sending
   const handleSendMessage = async () => {
     if(!input.trim()) {
       toast.error("Message cannot be empty")
       return
+    }
+    
+    // Stop typing indicator when sending
+    setIsTyping(false);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    if (socket && selectedUser) {
+      const receiverId = selectedUser._id || selectedUser.uid;
+      const isGroup = selectedUser.isGroup === true;
+      socket.emit("stoptyping", {
+        receiverId,
+        isGroup,
+        senderId: authuser?._id || authuser?.uid
+      });
     }
     
     const isGroup = selectedUser?.isGroup === true
@@ -687,17 +796,27 @@ const ChatContainer = () => {
                     <div className={`flex items-center justify-end gap-1 mt-1 ${isOwnMessage ? 'text-white/90' : 'text-gray-400'}`}>
                       <span className='text-[10px]'>{messageTime}</span>
                       {isOwnMessage && (
-                        <span className='text-xs ml-1'>
+                        <span className='text-xs ml-1 flex items-center'>
                           {msg.isSending ? (
                             <span className='inline-block w-3 h-3 border-2 border-white/50 border-t-white rounded-full animate-spin'></span>
-                          ) : !isGroup ? (
-                            (onlineUsers.includes(selectedUser?._id) || onlineUsers.includes(selectedUser?.uid) || onlineUsers.includes(selectedUser?.id)) ? (
-                              '✓✓'
-                            ) : (
-                              '✓'
-                            )
                           ) : (
-                            '✓✓'
+                            <>
+                              {msg.seen ? (
+                                // Double blue check - Read (WhatsApp style)
+                                <span className="flex items-center" title="Read">
+                                  <svg className="w-4 h-4 text-blue-400" viewBox="0 0 16 15" fill="none">
+                                    <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
+                                  </svg>
+                                </span>
+                              ) : (
+                                // Double gray check - Delivered (WhatsApp style)
+                                <span className="flex items-center" title="Delivered">
+                                  <svg className="w-4 h-4 text-gray-400" viewBox="0 0 16 15" fill="none">
+                                    <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.063-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
+                                  </svg>
+                                </span>
+                              )}
+                            </>
                           )}
                         </span>
                       )}
@@ -722,6 +841,26 @@ const ChatContainer = () => {
             <p>No messages yet. Start a conversation!</p>
           </div>
         )}
+        
+        {/* Typing Indicator */}
+        {typingUsers.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2">
+            <div className="flex items-center gap-1 bg-gray-700/50 rounded-full px-4 py-2">
+              <div className="flex gap-1">
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+              <span className="text-xs text-gray-300 ml-2">
+                {typingUsers.length === 1 
+                  ? `${typingUsers[0].senderName} is typing...`
+                  : `${typingUsers.length} people are typing...`
+                }
+              </span>
+            </div>
+          </div>
+        )}
+        
         <div ref={scrollEnd}></div>
       </div>
 
@@ -839,8 +978,10 @@ const ChatContainer = () => {
                 </svg>
               </button>
               <input onChange={handlesendimage} type="file" id='image' accept='image/png,image/jpeg,image/jpg,image/gif,image/webp' hidden/>
-              <label htmlFor="image" className="cursor-pointer">
-                <img src={assets.gallery_icon} alt="Attach image" className="w-5"/>
+              <label htmlFor="image" className="cursor-pointer hover:opacity-80 transition-opacity flex items-center justify-center" title="Attach image">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
               </label>
             </div>
           )}
