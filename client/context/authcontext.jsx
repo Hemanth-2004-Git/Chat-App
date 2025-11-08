@@ -71,21 +71,27 @@ export const AuthContextProvider = ({ children }) => {
   // Firebase auth state listener
   useEffect(() => {
     let currentSocket = null;
+    let tokenRefreshInterval = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       
-      // Clean up existing socket before creating new one
+      // Clean up existing socket and token refresh interval before creating new one
       if (currentSocket) {
         currentSocket.disconnect();
         currentSocket = null;
         setSocket(null);
       }
+      if (tokenRefreshInterval) {
+        clearInterval(tokenRefreshInterval);
+        tokenRefreshInterval = null;
+      }
 
       if (firebaseUser) {
         try {
-          // Get the Firebase ID token
-          const token = await firebaseUser.getIdToken();
+          // Get the Firebase ID token (automatically refreshes if expired)
+          // This ensures tokens are always fresh, even after app restart
+          const token = await firebaseUser.getIdToken(true); // Force refresh on app restart
           
           // Send token to backend to verify and get user data
           console.log("Axios instance baseURL:", axiosInstance.defaults.baseURL);
@@ -102,6 +108,26 @@ export const AuthContextProvider = ({ children }) => {
             // Set user data from our backend (include uid for socket)
             const userData = { ...data.user, uid: firebaseUser.uid, _id: data.user.uid || firebaseUser.uid };
             setUser(userData);
+            
+            // Set up automatic token refresh (Firebase tokens expire after 1 hour)
+            // Refresh token every 50 minutes to prevent expiration
+            tokenRefreshInterval = setInterval(async () => {
+              try {
+                const currentUser = auth.currentUser;
+                if (currentUser) {
+                  const newToken = await currentUser.getIdToken(true);
+                  localStorage.setItem("authToken", newToken);
+                  console.log("✅ Token refreshed automatically");
+                } else {
+                  clearInterval(tokenRefreshInterval);
+                  tokenRefreshInterval = null;
+                }
+              } catch (error) {
+                console.error("Error refreshing token:", error);
+                clearInterval(tokenRefreshInterval);
+                tokenRefreshInterval = null;
+              }
+            }, 50 * 60 * 1000); // 50 minutes
 
             // Initialize socket connection
             const newSocket = io(SOCKET_URL, {
@@ -133,11 +159,20 @@ export const AuthContextProvider = ({ children }) => {
           setUser(null);
           localStorage.removeItem("authToken");
           setOnlineUsers([]);
+          if (tokenRefreshInterval) {
+            clearInterval(tokenRefreshInterval);
+            tokenRefreshInterval = null;
+          }
         }
       } else {
+        // User logged out - clean up
         setUser(null);
         localStorage.removeItem("authToken");
         setOnlineUsers([]);
+        if (tokenRefreshInterval) {
+          clearInterval(tokenRefreshInterval);
+          tokenRefreshInterval = null;
+        }
       }
       setLoading(false);
     });
@@ -146,6 +181,9 @@ export const AuthContextProvider = ({ children }) => {
       unsubscribe();
       if (currentSocket) {
         currentSocket.disconnect();
+      }
+      if (tokenRefreshInterval) {
+        clearInterval(tokenRefreshInterval);
       }
     };
   }, [axiosInstance]);

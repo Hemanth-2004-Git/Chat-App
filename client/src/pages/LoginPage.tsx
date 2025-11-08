@@ -1,6 +1,6 @@
 // client/src/pages/LoginPage.tsx
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { useAuth } from "../../context/authcontext.jsx";
@@ -14,9 +14,16 @@ console.log("LoginPage API_URL:", API_URL);
 
 const LoginPage = () => {
   const [loading, setLoading] = useState(false);
-  const { setUser } = useAuth();
+  const { setUser, authuser } = useAuth();
   const navigate = useNavigate();
   const googleProvider = new GoogleAuthProvider();
+
+  // Navigate to home when auth state is updated after login
+  useEffect(() => {
+    if (authuser) {
+      navigate("/home", { replace: true });
+    }
+  }, [authuser, navigate]);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -38,9 +45,9 @@ const LoginPage = () => {
       // will handle fetching user data and setting the user state.
       console.log("Firebase login successful:", userCredential.user.uid);
       
-      // ✅ Navigate immediately for faster UX - auth context will handle the rest
-      navigate("/");
+      // Show success message - navigation will happen via useEffect when authuser is set
       toast.success("Logged in successfully!");
+      // Don't navigate here - let useEffect handle it when authuser is available
     } catch (err: any) {
       console.error("Firebase login error:", err);
       let errorMessage = "Failed to log in.";
@@ -87,16 +94,14 @@ const LoginPage = () => {
           });
         }
         
-        // ✅ Navigate immediately for faster UX
-        navigate("/");
+        // Show success message - navigation will happen via useEffect when authuser is set
         toast.success("Signed in with Google successfully!");
       } catch (dbError: any) {
         console.error("Database error:", dbError);
         console.error("Error details:", dbError.response?.data || dbError.message);
         const errorMsg = dbError.response?.data?.message || dbError.message || "Failed to load profile";
         toast.error(`Login successful but ${errorMsg}. The auth context will handle the rest.`);
-        // Let the auth context handle the user state from Firebase
-        navigate("/");
+        // Let the auth context handle the user state from Firebase - navigation will happen via useEffect
       }
     } catch (err: any) {
       console.error("Google login error:", err);

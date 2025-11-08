@@ -1,6 +1,6 @@
 // client/lib/firebase.js
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 
 // Your web app's Firebase configuration
@@ -18,6 +18,18 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Export auth and database services
+// Initialize auth with explicit LOCAL persistence
+// This ensures users stay logged in even after closing the app
 export const auth = getAuth(app);
+
+// Set persistence to LOCAL (persists across app restarts)
+// This is the default for web, but we set it explicitly for clarity and mobile compatibility
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log("✅ Firebase Auth persistence set to LOCAL - users will stay logged in");
+  })
+  .catch((error) => {
+    console.error("❌ Error setting auth persistence:", error);
+  });
+
 export const db = getDatabase(app);
