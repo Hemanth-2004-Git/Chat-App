@@ -13,7 +13,7 @@ dotenv.config({ path: join(__serverDir, ".env") });
 import http from "http";
 import userrouter from "./routes/userroute.js";
 import { Server } from "socket.io";
-import { initializeFirebase } from "./lib/firebase.js"; // Import Firebase initializer
+import { initializeFirebase, db } from "./lib/firebase.js"; // Import Firebase initializer and db
 import messagerouter from "./routes/messageroute.js";
 
 const app = express();
@@ -168,8 +168,24 @@ io.on("connection", (socket) => {
     });
 
     // Typing indicators
-    socket.on("typing", (data) => {
+    socket.on("typing", async (data) => {
         const { receiverId, isGroup, senderId } = data;
+        
+        // Get sender name from data or fetch from database
+        let senderName = data.senderName;
+        if (!senderName && senderId) {
+            try {
+                const userSnapshot = await db.ref(`users/${senderId}`).once('value');
+                if (userSnapshot.exists()) {
+                    senderName = userSnapshot.val().fullName || 'Someone';
+                } else {
+                    senderName = 'Someone';
+                }
+            } catch (error) {
+                console.error("Error fetching user name for typing indicator:", error);
+                senderName = data.senderName || 'Someone';
+            }
+        }
         
         if (isGroup) {
             // For groups, emit to all members except sender
@@ -179,7 +195,7 @@ io.on("connection", (socket) => {
                 if (memberSocketId) {
                     io.to(memberSocketId).emit("usertyping", {
                         senderId,
-                        senderName: data.senderName || 'Someone',
+                        senderName: senderName,
                         groupId: receiverId
                     });
                 }
@@ -190,7 +206,7 @@ io.on("connection", (socket) => {
             if (receiverSocketId) {
                 io.to(receiverSocketId).emit("usertyping", {
                     senderId,
-                    senderName: data.senderName || 'Someone'
+                    senderName: senderName
                 });
             }
         }

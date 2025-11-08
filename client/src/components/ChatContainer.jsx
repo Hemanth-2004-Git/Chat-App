@@ -45,7 +45,8 @@ const ChatContainer = () => {
         socket.emit("typing", {
           receiverId,
           isGroup,
-          senderId: authuser?._id || authuser?.uid
+          senderId: authuser?._id || authuser?.uid,
+          senderName: authuser?.fullName || 'Someone'
         });
       }
 
@@ -84,17 +85,36 @@ const ChatContainer = () => {
     };
   }, [input, socket, selectedUser, isTyping, editingMessage, authuser]);
 
-  // Listen for typing events
+  // Listen for typing events - only show for currently selected chat
   useEffect(() => {
     if (!socket || !selectedUser) return;
 
     const handleUserTyping = (data) => {
-      const { senderId, senderName } = data;
+      const { senderId, senderName, groupId } = data;
       const currentUserId = authuser?._id || authuser?.uid;
       
       // Don't show typing indicator for own messages
       if (senderId === currentUserId) return;
 
+      // Check if this typing event is for the currently selected chat
+      const selectedUserId = selectedUser._id || selectedUser.uid;
+      const isGroup = selectedUser.isGroup === true;
+      
+      // For direct messages: only show if sender is typing to the selected user
+      // For groups: only show if it's for the current group
+      if (isGroup) {
+        // For groups, check if the groupId matches
+        if (groupId !== selectedUserId) {
+          return; // Not for this group, ignore
+        }
+      } else {
+        // For direct messages, check if the sender is the selected user
+        if (senderId !== selectedUserId) {
+          return; // Not typing to the selected user, ignore
+        }
+      }
+
+      // Only show typing indicator if it's for the current chat
       setTypingUsers(prev => {
         if (!prev.find(u => u.senderId === senderId)) {
           return [...prev, { senderId, senderName: senderName || 'Someone' }];
@@ -109,12 +129,25 @@ const ChatContainer = () => {
     };
 
     const handleUserStopTyping = (data) => {
-      const { senderId } = data;
+      const { senderId, groupId } = data;
+      const selectedUserId = selectedUser._id || selectedUser.uid;
+      const isGroup = selectedUser.isGroup === true;
+      
+      // Only remove typing indicator if it's for the current chat
+      if (isGroup) {
+        if (groupId !== selectedUserId) return;
+      } else {
+        if (senderId !== selectedUserId) return;
+      }
+      
       setTypingUsers(prev => prev.filter(u => u.senderId !== senderId));
     };
 
     socket.on("usertyping", handleUserTyping);
     socket.on("userstoptyping", handleUserStopTyping);
+
+    // Clear typing indicators when switching chats
+    setTypingUsers([]);
 
     return () => {
       socket.off("usertyping", handleUserTyping);
@@ -902,7 +935,9 @@ const ChatContainer = () => {
               <span className="text-xs text-gray-300 ml-2">
                 {typingUsers.length === 1 
                   ? `${typingUsers[0].senderName} is typing...`
-                  : `${typingUsers.length} people are typing...`
+                  : typingUsers.length === 2
+                  ? `${typingUsers[0].senderName} and ${typingUsers[1].senderName} are typing...`
+                  : `${typingUsers.map(u => u.senderName).join(', ')} are typing...`
                 }
               </span>
             </div>
