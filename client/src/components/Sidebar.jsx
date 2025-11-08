@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState, useRef } from 'react';
 import assets from '../assets/assets';
 import { useNavigate } from 'react-router-dom';
 import { authcontext } from '../../context/authcontext';
@@ -7,6 +7,10 @@ import CreateGroupModal from './CreateGroupModal';
 
 const Sidebar = () => {
     const [showCreateGroup, setShowCreateGroup] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
+    const [showMainMenu, setShowMainMenu] = useState(false);
+    const menuRef = useRef(null);
+    const mainMenuRef = useRef(null);
     const { 
         getUsers, 
         users, 
@@ -25,6 +29,28 @@ const Sidebar = () => {
     useEffect(() => {
         getUsers();
     }, []); // Empty dependency array
+
+    // Close menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (menuRef.current && !menuRef.current.contains(event.target)) {
+                setShowMenu(false);
+            }
+            if (mainMenuRef.current && !mainMenuRef.current.contains(event.target)) {
+                setShowMainMenu(false);
+            }
+        };
+
+        if (showMenu || showMainMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+            document.addEventListener('touchstart', handleClickOutside);
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('touchstart', handleClickOutside);
+        };
+    }, [showMenu, showMainMenu]);
 
     // ✅ Safe filtering with fallbacks
     // Show recent chats when no search, show filtered users when searching
@@ -76,31 +102,59 @@ const Sidebar = () => {
                         <div className="flex items-center gap-2 flex-shrink-0">
                             {/* Three-dot menu - always show when user chat is selected */}
                             {selectedUser && !selectedUser.isGroup && (
-                                <div className="relative group">
+                                <div className="relative" ref={menuRef}>
                                     <button
                                         type="button"
-                                        className="p-1.5 cursor-pointer hover:opacity-80 transition-opacity flex items-center justify-center w-8 h-8"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setShowMenu(!showMenu);
+                                        }}
+                                        onTouchStart={(e) => {
+                                            e.stopPropagation();
+                                            setShowMenu(!showMenu);
+                                        }}
+                                        className="p-1.5 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-8 h-8 touch-manipulation"
                                         title="Menu"
                                     >
                                         <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
                                             <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
                                         </svg>
                                     </button>
-                                    <div className="absolute top-full right-0 z-50 w-32 p-3 rounded-md bg-[#282142] border border-gray-600 text-gray-100 hidden group-hover:block shadow-lg mt-1">
-                                        <p
-                                            onClick={() => navigate('/profile')}
-                                            className="cursor-pointer text-sm hover:text-purple-400 py-1"
-                                        >
-                                            Edit Profile
-                                        </p>
-                                        <hr className="my-2 border-t border-gray-500" />
-                                        <p 
-                                            onClick={() => logout()} 
-                                            className="cursor-pointer text-sm hover:text-red-400 py-1"
-                                        >
-                                            Logout
-                                        </p>
-                                    </div>
+                                    {showMenu && (
+                                        <div className="absolute top-full right-0 z-50 w-32 p-3 rounded-md bg-[#282142] border border-gray-600 text-gray-100 shadow-lg mt-1">
+                                            <p
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMenu(false);
+                                                    navigate('/profile');
+                                                }}
+                                                onTouchStart={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMenu(false);
+                                                    navigate('/profile');
+                                                }}
+                                                className="cursor-pointer text-sm hover:text-purple-400 active:text-purple-300 py-1 touch-manipulation"
+                                            >
+                                                Edit Profile
+                                            </p>
+                                            <hr className="my-2 border-t border-gray-500" />
+                                            <p 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMenu(false);
+                                                    logout();
+                                                }}
+                                                onTouchStart={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMenu(false);
+                                                    logout();
+                                                }}
+                                                className="cursor-pointer text-sm hover:text-red-400 active:text-red-300 py-1 touch-manipulation"
+                                            >
+                                                Logout
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             {/* New Group Icon Button - always visible */}
@@ -115,10 +169,18 @@ const Sidebar = () => {
                             </button>
                             {/* Show original menu icon when no user selected or group is selected */}
                             {(!selectedUser || selectedUser.isGroup) && (
-                                <div className="relative group">
+                                <div className="relative" ref={mainMenuRef}>
                                     <button
                                         type="button"
-                                        className="p-1.5 cursor-pointer hover:opacity-80 transition-opacity flex items-center justify-center w-8 h-8"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setShowMainMenu(!showMainMenu);
+                                        }}
+                                        onTouchStart={(e) => {
+                                            e.stopPropagation();
+                                            setShowMainMenu(!showMainMenu);
+                                        }}
+                                        className="p-1.5 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-8 h-8 touch-manipulation"
                                         title="Menu"
                                     >
                                         <img
@@ -127,21 +189,41 @@ const Sidebar = () => {
                                             className="w-5 h-5 object-contain"
                                         />
                                     </button>
-                                    <div className="absolute top-full right-0 z-50 w-32 p-3 rounded-md bg-[#282142] border border-gray-600 text-gray-100 hidden group-hover:block shadow-lg mt-1">
-                                        <p
-                                            onClick={() => navigate('/profile')}
-                                            className="cursor-pointer text-sm hover:text-purple-400 py-1"
-                                        >
-                                            Edit Profile
-                                        </p>
-                                        <hr className="my-2 border-t border-gray-500" />
-                                        <p 
-                                            onClick={() => logout()} 
-                                            className="cursor-pointer text-sm hover:text-red-400 py-1"
-                                        >
-                                            Logout
-                                        </p>
-                                    </div>
+                                    {showMainMenu && (
+                                        <div className="absolute top-full right-0 z-50 w-32 p-3 rounded-md bg-[#282142] border border-gray-600 text-gray-100 shadow-lg mt-1">
+                                            <p
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMainMenu(false);
+                                                    navigate('/profile');
+                                                }}
+                                                onTouchStart={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMainMenu(false);
+                                                    navigate('/profile');
+                                                }}
+                                                className="cursor-pointer text-sm hover:text-purple-400 active:text-purple-300 py-1 touch-manipulation"
+                                            >
+                                                Edit Profile
+                                            </p>
+                                            <hr className="my-2 border-t border-gray-500" />
+                                            <p 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMainMenu(false);
+                                                    logout();
+                                                }}
+                                                onTouchStart={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowMainMenu(false);
+                                                    logout();
+                                                }}
+                                                className="cursor-pointer text-sm hover:text-red-400 active:text-red-300 py-1 touch-manipulation"
+                                            >
+                                                Logout
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

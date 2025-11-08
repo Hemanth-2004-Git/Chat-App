@@ -520,13 +520,21 @@ const ChatContainer = () => {
           <img src={assets.arrow_icon} alt="Back" className='w-6 h-6'/>
         </button>
         <button
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             // Toggle right sidebar via parent component
             const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
             window.dispatchEvent(event);
             setShowInfo(!showInfo)
           }}
-          className='p-1.5 md:p-2 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0'
+          onTouchStart={(e) => {
+            e.stopPropagation();
+            // Toggle right sidebar via parent component
+            const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
+            window.dispatchEvent(event);
+            setShowInfo(!showInfo)
+          }}
+          className='p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex-shrink-0 touch-manipulation'
           aria-label="Info"
         >
           <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6'/>
