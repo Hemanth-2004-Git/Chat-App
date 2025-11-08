@@ -58,145 +58,170 @@ const ImageViewerModal = ({ isOpen, onClose, imageUrl, imageName = 'image' }) =>
         }
       }
       
-      // For CORS-protected images (like Cloudinary), we need to use a proxy or fetch with credentials
-      // First, try direct fetch
-      let blob
-      try {
-        const response = await fetch(imageUrl, {
-          mode: 'cors',
-          credentials: 'omit'
-        })
-        
-        if (!response.ok) {
-          throw new Error('Failed to fetch image')
-        }
-        
-        blob = await response.blob()
-      } catch (fetchError) {
-        // If direct fetch fails due to CORS, use canvas method
-        console.log('Direct fetch failed, trying canvas method...', fetchError)
-        
-        // Create an image element to load the image
-        const img = new Image()
-        img.crossOrigin = 'anonymous' // Try to handle CORS
-        
-        blob = await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Image load timeout'))
-          }, 10000) // 10 second timeout
-          
-          img.onload = () => {
-            clearTimeout(timeout)
-            try {
-              // Create canvas and draw image
-              const canvas = document.createElement('canvas')
-              canvas.width = img.naturalWidth
-              canvas.height = img.naturalHeight
-              
-              const ctx = canvas.getContext('2d')
-              ctx.drawImage(img, 0, 0)
-              
-              // Convert canvas to blob
-              canvas.toBlob((canvasBlob) => {
-                if (canvasBlob) {
-                  resolve(canvasBlob)
-                } else {
-                  reject(new Error('Failed to convert canvas to blob'))
-                }
-              }, 'image/jpeg', 0.95)
-            } catch (error) {
-              reject(error)
-            }
-          }
-          
-          img.onerror = (error) => {
-            clearTimeout(timeout)
-            reject(new Error('Failed to load image for download'))
-          }
-          
-          // Set src after setting up handlers
-          img.src = imageUrl
-        })
-      }
-      
-      // Handle download differently for mobile/APK vs desktop
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.style.display = 'none'
-      
-      if (isMobile || isWebView) {
-        // For mobile/APK: Try multiple methods
-        // Method 1: Try standard download (works in some mobile browsers)
-        document.body.appendChild(link)
-        
-        // Try to trigger download
+      // For Android APK/WebView, use a more reliable method
+      if (isWebView && /Android/i.test(navigator.userAgent)) {
+        // Method 1: Try to convert to base64 data URI and download
         try {
+          // Fetch the image
+          const response = await fetch(imageUrl, {
+            mode: 'cors',
+            credentials: 'omit'
+          })
+          
+          if (!response.ok) {
+            throw new Error('Failed to fetch image')
+          }
+          
+          const blob = await response.blob()
+          
+          // Convert blob to base64
+          const reader = new FileReader()
+          const base64Data = await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result)
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+          
+          // Create a link with data URI (more reliable for Android WebView)
+          const link = document.createElement('a')
+          link.href = base64Data
+          link.download = filename
+          link.style.display = 'none'
+          document.body.appendChild(link)
+          
+          // Trigger download
           link.click()
           
-          // Cleanup after a delay
+          // Cleanup
           setTimeout(() => {
             try {
               document.body.removeChild(link)
             } catch (e) {
-              // Link might have been removed already
+              // Link might have been removed
             }
-            window.URL.revokeObjectURL(url)
           }, 1000)
           
-          toast.success('Image download started! Check your downloads folder.')
-        } catch (error) {
-          console.log('Standard download failed, trying alternative method...', error)
+          toast.success('Image download started!')
+        } catch (fetchError) {
+          console.log('Base64 method failed, trying canvas...', fetchError)
           
-          // Clean up the link
+          // Method 2: Use canvas to convert image
           try {
-            document.body.removeChild(link)
-          } catch (e) {
-            // Link might not be in DOM
-          }
-          
-          // Method 2: For Android WebView, try opening in new tab
-          if (isWebView && /Android/i.test(navigator.userAgent)) {
-            // Open blob URL in new tab - user can long-press to save
-            window.open(url, '_blank')
-            toast.success('Image opened. Long press to save to gallery.')
-          } else {
-            // Method 3: Try Web Share API (if supported)
-            if (navigator.share) {
-              try {
-                const file = new File([blob], filename, { type: blob.type })
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                  navigator.share({
-                    title: 'Download Image',
-                    files: [file]
-                  }).then(() => {
-                    toast.success('Image shared successfully!')
-                    window.URL.revokeObjectURL(url)
-                  }).catch(() => {
-                    // Fallback: open blob URL
-                    window.open(url, '_blank')
-                    toast.success('Image opened. Long press to save.')
-                  })
-                } else {
-                  // Web Share API doesn't support files, open directly
-                  window.open(url, '_blank')
-                  toast.success('Image opened. Long press to save.')
+            const img = new Image()
+            img.crossOrigin = 'anonymous'
+            
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('Timeout')), 10000)
+              
+              img.onload = () => {
+                clearTimeout(timeout)
+                try {
+                  const canvas = document.createElement('canvas')
+                  canvas.width = img.naturalWidth
+                  canvas.height = img.naturalHeight
+                  const ctx = canvas.getContext('2d')
+                  ctx.drawImage(img, 0, 0)
+                  
+                  // Convert to data URI
+                  const dataUri = canvas.toDataURL('image/jpeg', 0.95)
+                  
+                  // Create download link with data URI
+                  const link = document.createElement('a')
+                  link.href = dataUri
+                  link.download = filename
+                  link.style.display = 'none'
+                  document.body.appendChild(link)
+                  link.click()
+                  
+                  setTimeout(() => {
+                    try {
+                      document.body.removeChild(link)
+                    } catch (e) {}
+                  }, 1000)
+                  
+                  toast.success('Image download started!')
+                  resolve()
+                } catch (error) {
+                  reject(error)
                 }
-              } catch (shareError) {
-                // Web Share failed, open blob URL
-                window.open(url, '_blank')
-                toast.success('Image opened. Long press to save.')
               }
-            } else {
-              // No Web Share API, open blob URL
-              window.open(url, '_blank')
-              toast.success('Image opened. Long press to save.')
-            }
+              
+              img.onerror = () => {
+                clearTimeout(timeout)
+                reject(new Error('Failed to load image'))
+              }
+              
+              img.src = imageUrl
+            })
+          } catch (canvasError) {
+            console.log('Canvas method failed, opening in new tab...', canvasError)
+            // Final fallback: open original URL
+            window.open(imageUrl, '_blank')
+            toast.success('Image opened. Long press to save to gallery.')
           }
         }
       } else {
-        // Desktop: Standard download
+        // For other platforms (desktop, iOS, regular mobile browsers)
+        let blob
+        try {
+          const response = await fetch(imageUrl, {
+            mode: 'cors',
+            credentials: 'omit'
+          })
+          
+          if (!response.ok) {
+            throw new Error('Failed to fetch image')
+          }
+          
+          blob = await response.blob()
+        } catch (fetchError) {
+          // If direct fetch fails, use canvas method
+          console.log('Direct fetch failed, trying canvas method...', fetchError)
+          
+          const img = new Image()
+          img.crossOrigin = 'anonymous'
+          
+          blob = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Image load timeout'))
+            }, 10000)
+            
+            img.onload = () => {
+              clearTimeout(timeout)
+              try {
+                const canvas = document.createElement('canvas')
+                canvas.width = img.naturalWidth
+                canvas.height = img.naturalHeight
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(img, 0, 0)
+                
+                canvas.toBlob((canvasBlob) => {
+                  if (canvasBlob) {
+                    resolve(canvasBlob)
+                  } else {
+                    reject(new Error('Failed to convert canvas to blob'))
+                  }
+                }, 'image/jpeg', 0.95)
+              } catch (error) {
+                reject(error)
+              }
+            }
+            
+            img.onerror = () => {
+              clearTimeout(timeout)
+              reject(new Error('Failed to load image'))
+            }
+            
+            img.src = imageUrl
+          })
+        }
+        
+        // Create download link
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = filename
+        link.style.display = 'none'
         document.body.appendChild(link)
         link.click()
         
@@ -211,7 +236,7 @@ const ImageViewerModal = ({ isOpen, onClose, imageUrl, imageName = 'image' }) =>
     } catch (error) {
       console.error('Error downloading image:', error)
       toast.error('Failed to download. Opening in new tab...')
-      // Fallback: open in new tab
+      // Final fallback: open in new tab
       window.open(imageUrl, '_blank')
     }
   }

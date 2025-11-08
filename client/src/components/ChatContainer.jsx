@@ -31,6 +31,10 @@ const ChatContainer = () => {
   const [isTyping, setIsTyping] = useState(false)
   const [typingUsers, setTypingUsers] = useState([])
   const typingTimeoutRef = useRef(null)
+  const [swipeOffset, setSwipeOffset] = useState({})
+  const [swipingMessageId, setSwipingMessageId] = useState(null)
+  const touchStartRef = useRef({})
+  const [showInfo, setShowInfo] = useState(false)
 
   // Typing indicator logic
   useEffect(() => {
@@ -270,6 +274,83 @@ const ChatContainer = () => {
     }
   }
 
+  // Swipe to reply handlers
+  const handleTouchStart = (e, messageId) => {
+    const touch = e.touches[0]
+    touchStartRef.current[messageId] = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now()
+    }
+  }
+
+  const handleTouchMove = (e, messageId, isOwnMessage) => {
+    if (!touchStartRef.current[messageId]) return
+    
+    const touch = e.touches[0]
+    const start = touchStartRef.current[messageId]
+    const deltaX = touch.clientX - start.x
+    const deltaY = Math.abs(touch.clientY - start.y)
+    
+    // Only allow horizontal swipe (not vertical scrolling)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+      e.preventDefault()
+      
+      // For own messages, swipe left to reply. For others, swipe right to reply
+      const maxSwipe = 100
+      let offset = 0
+      
+      if (isOwnMessage && deltaX < 0) {
+        // Own message: swipe left
+        offset = Math.max(-maxSwipe, deltaX)
+      } else if (!isOwnMessage && deltaX > 0) {
+        // Other's message: swipe right
+        offset = Math.min(maxSwipe, deltaX)
+      }
+      
+      setSwipeOffset(prev => ({ ...prev, [messageId]: offset }))
+      setSwipingMessageId(messageId)
+    }
+  }
+
+  const handleTouchEnd = (e, messageId, msg, isOwnMessage) => {
+    if (!touchStartRef.current[messageId]) return
+    
+    const start = touchStartRef.current[messageId]
+    const touch = e.changedTouches[0]
+    const deltaX = touch.clientX - start.x
+    const deltaY = Math.abs(touch.clientY - start.y)
+    const deltaTime = Date.now() - start.time
+    
+    // Check if it's a valid swipe gesture
+    const isSwipe = Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) && deltaTime < 300
+    
+    if (isSwipe) {
+      if ((isOwnMessage && deltaX < -50) || (!isOwnMessage && deltaX > 50)) {
+        // Trigger reply
+        handleReplyToMessage(msg)
+      }
+    }
+    
+    // Reset swipe state
+    setSwipeOffset(prev => {
+      const newState = { ...prev }
+      delete newState[messageId]
+      return newState
+    })
+    setSwipingMessageId(null)
+    delete touchStartRef.current[messageId]
+    
+    // Animate back
+    setTimeout(() => {
+      setSwipeOffset(prev => {
+        const newState = { ...prev }
+        delete newState[messageId]
+        return newState
+      })
+    }, 200)
+  }
+
   const handleEmojiSelect = (emoji) => {
     setInput(prev => prev + emoji)
     // Focus back on input after emoji selection
@@ -407,13 +488,13 @@ const ChatContainer = () => {
       {/* Content with relative positioning */}
       <div className='relative z-10 h-full'>
       {/* Header */}
-        <div className='flex items-center gap-3 py-3 mx-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm'>
-        <img src={selectedUser.profilePic || assets.avatar_icon} alt="" className="w-8 rounded-full"/>
+        <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm sticky top-0 z-20'>
+        <img src={selectedUser.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0"/>
         <div className='flex-1 min-w-0'>
-          <p className='text-lg text-white flex items-center gap-2'>
+          <p className='text-base md:text-lg text-white flex items-center gap-2 truncate'>
             {selectedUser.fullName}
             {!selectedUser.isGroup && onlineUsers.includes(selectedUser._id) && (
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>
             )}
           </p>
           {!selectedUser.isGroup && (
@@ -431,26 +512,29 @@ const ChatContainer = () => {
             </p>
           )}
         </div>
-        <img 
+        <button
           onClick={() => setSelectedUser(null)} 
-          src={assets.arrow_icon} 
-          alt=""
-          className='md:hidden max-w-7 cursor-pointer'
-        />
-        <img 
-          src={assets.help_icon} 
-          alt="Info" 
+          className='md:hidden p-1 cursor-pointer hover:opacity-80 transition-opacity'
+          aria-label="Back"
+        >
+          <img src={assets.arrow_icon} alt="Back" className='w-6 h-6'/>
+        </button>
+        <button
           onClick={() => {
             // Toggle right sidebar via parent component
             const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
             window.dispatchEvent(event);
+            setShowInfo(!showInfo)
           }}
-          className='max-md:hidden max-w-5 cursor-pointer hover:opacity-80 transition-opacity'
-        />
+          className='p-1.5 md:p-2 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0'
+          aria-label="Info"
+        >
+          <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6'/>
+        </button>
       </div>
 
         {/* Messages - WhatsApp Style */}
-        <div className='flex flex-col h-[calc(100%-120px)] overflow-y-auto px-4 py-2 gap-1'>
+        <div className='flex flex-col h-[calc(100%-120px)] md:h-[calc(100%-140px)] overflow-y-auto px-2 md:px-4 py-2 gap-1 touch-pan-y'>
         {loadingMessages && messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-gray-400">
@@ -559,21 +643,39 @@ const ChatContainer = () => {
               )}
               
             <div 
-                  className={`flex items-end gap-2 w-full mb-2 ${isOwnMessage ? 'justify-end' : 'justify-start'} relative group`}
+                  className={`flex items-end gap-2 w-full mb-2 ${isOwnMessage ? 'justify-end' : 'justify-start'} relative group overflow-hidden`}
                   onMouseEnter={() => setHoveredMessageId(msg._id || msg.id)}
                   onMouseLeave={() => !showDeleteMenu && setHoveredMessageId(null)}
+                  onTouchStart={(e) => handleTouchStart(e, msg._id || msg.id)}
+                  onTouchMove={(e) => handleTouchMove(e, msg._id || msg.id, isOwnMessage)}
+                  onTouchEnd={(e) => handleTouchEnd(e, msg._id || msg.id, msg, isOwnMessage)}
+                  style={{
+                    transform: swipeOffset[msg._id || msg.id] ? `translateX(${swipeOffset[msg._id || msg.id]}px)` : 'translateX(0)',
+                    transition: swipingMessageId === (msg._id || msg.id) ? 'none' : 'transform 0.2s ease-out'
+                  }}
                 >
+                  {/* Swipe indicator */}
+                  {swipeOffset[msg._id || msg.id] && Math.abs(swipeOffset[msg._id || msg.id]) > 30 && (
+                    <div className={`absolute ${isOwnMessage ? 'right-0' : 'left-0'} top-1/2 -translate-y-1/2 flex items-center gap-2 ${isOwnMessage ? 'pr-2' : 'pl-2'}`}>
+                      <div className="bg-[#00A884]/80 rounded-full p-2">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                        </svg>
+                      </div>
+                      <span className="text-xs text-white font-medium">Reply</span>
+                    </div>
+                  )}
                   {/* Other user's profile pic - shown on LEFT for received messages */}
               {!isOwnMessage && (
                 <img 
                       src={senderProfilePic} 
                       alt={isGroup ? senderName : selectedUser?.fullName} 
-                      className='w-8 h-8 rounded-full object-cover flex-shrink-0 mb-1'
+                      className='w-7 h-7 md:w-8 md:h-8 rounded-full object-cover flex-shrink-0 mb-1'
                     />
                   )}
                   
                   {/* Message content - WhatsApp style bubbles */}
-                  <div className={`flex flex-col ${isOwnMessage ? 'items-end max-w-[75%]' : 'items-start max-w-[75%]'} relative ${isOwnMessage ? 'pr-2' : ''}`}>
+                  <div className={`flex flex-col ${isOwnMessage ? 'items-end max-w-[85%] md:max-w-[75%]' : 'items-start max-w-[85%] md:max-w-[75%]'} relative ${isOwnMessage ? 'pr-2' : ''}`}>
                     {/* Show sender name in group chats */}
                     {isGroup && !isOwnMessage && senderName && (
                       <span className="text-xs text-gray-400 mb-0.5 px-1">{senderName}</span>
@@ -1036,8 +1138,8 @@ const ChatContainer = () => {
                 </div>
               )}
               
-              <div className='flex items-center gap-3 p-3'>
-        <div className='flex-1 flex items-center bg-gray-100/12 px-3 rounded-full'>
+              <div className='flex items-center gap-2 md:gap-3 p-2 md:p-3 bg-black/10 backdrop-blur-sm'>
+        <div className='flex-1 flex items-center bg-gray-100/12 px-2 md:px-3 rounded-full'>
           <input 
             onChange={(e) => setInput(e.target.value)} 
             value={input} 
