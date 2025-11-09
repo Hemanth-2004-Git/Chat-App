@@ -478,13 +478,25 @@ const ChatContainer = () => {
       // Try direct function call first (more reliable for APK)
       if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
         window.toggleInfoPanel();
-      } else {
-        // Fallback to CustomEvent
+        return;
+      }
+      
+      // Fallback to CustomEvent
+      if (typeof window !== 'undefined') {
         const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
         window.dispatchEvent(event);
       }
     } catch (error) {
       console.error('Error toggling info panel:', error);
+      // Last resort: try to trigger via direct event
+      try {
+        if (typeof window !== 'undefined') {
+          const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
+          window.dispatchEvent(event);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback toggle also failed:', fallbackError);
+      }
     }
   }
 
@@ -524,9 +536,8 @@ const ChatContainer = () => {
       <div className='relative z-10 flex-1 flex flex-col overflow-hidden'>
       {/* Header */}
         <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm flex-shrink-0 z-20'>
-        <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
         <div 
-          className='flex-1 min-w-0 cursor-pointer active:opacity-70 transition-opacity'
+          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer active:opacity-70 transition-opacity py-2 -mx-2 px-2 rounded-lg hover:bg-black/10"
           onClick={(e) => {
             try {
               e.stopPropagation();
@@ -536,17 +547,36 @@ const ChatContainer = () => {
               console.error('Error toggling info panel:', error);
             }
           }}
+          onTouchStart={(e) => {
+            try {
+              e.stopPropagation();
+              // Mark touch started for better handling
+              e.currentTarget.style.opacity = '0.7';
+            } catch (error) {
+              console.error('Error in touch start:', error);
+            }
+          }}
           onTouchEnd={(e) => {
             try {
               e.stopPropagation();
               e.preventDefault();
+              e.currentTarget.style.opacity = '1';
               handleToggleInfo();
             } catch (error) {
               console.error('Error toggling info panel:', error);
             }
           }}
-          style={{ touchAction: 'manipulation' }}
+          onTouchCancel={(e) => {
+            try {
+              e.currentTarget.style.opacity = '1';
+            } catch (error) {
+              console.error('Error in touch cancel:', error);
+            }
+          }}
+          style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
         >
+          <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0 pointer-events-none" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
+          <div className='flex-1 min-w-0'>
           <p className='text-base md:text-lg text-white flex items-center gap-2 truncate'>
             {selectedUser?.fullName || selectedUser?.name || 'Unknown User'}
             {!selectedUser?.isGroup && selectedUser?._id && Array.isArray(onlineUsers) && onlineUsers.includes(selectedUser._id) && (
@@ -567,6 +597,7 @@ const ChatContainer = () => {
               {selectedUser?.members?.length || 0} participants
             </p>
           )}
+          </div>
         </div>
         <button
           onClick={() => setSelectedUser(null)} 
