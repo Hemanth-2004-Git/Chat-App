@@ -34,7 +34,6 @@ const ChatContainer = () => {
   const [swipeOffset, setSwipeOffset] = useState({})
   const [swipingMessageId, setSwipingMessageId] = useState(null)
   const touchStartRef = useRef({})
-  const [showInfo, setShowInfo] = useState(false)
 
   // Typing indicator logic
   useEffect(() => {
@@ -484,7 +483,6 @@ const ChatContainer = () => {
         const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
         window.dispatchEvent(event);
       }
-      setShowInfo(!showInfo);
     } catch (error) {
       console.error('Error toggling info panel:', error);
     }
@@ -527,7 +525,28 @@ const ChatContainer = () => {
       {/* Header */}
         <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm flex-shrink-0 z-20'>
         <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
-        <div className='flex-1 min-w-0'>
+        <div 
+          className='flex-1 min-w-0 cursor-pointer active:opacity-70 transition-opacity'
+          onClick={(e) => {
+            try {
+              e.stopPropagation();
+              e.preventDefault();
+              handleToggleInfo();
+            } catch (error) {
+              console.error('Error toggling info panel:', error);
+            }
+          }}
+          onTouchEnd={(e) => {
+            try {
+              e.stopPropagation();
+              e.preventDefault();
+              handleToggleInfo();
+            } catch (error) {
+              console.error('Error toggling info panel:', error);
+            }
+          }}
+          style={{ touchAction: 'manipulation' }}
+        >
           <p className='text-base md:text-lg text-white flex items-center gap-2 truncate'>
             {selectedUser?.fullName || selectedUser?.name || 'Unknown User'}
             {!selectedUser?.isGroup && selectedUser?._id && Array.isArray(onlineUsers) && onlineUsers.includes(selectedUser._id) && (
@@ -555,32 +574,6 @@ const ChatContainer = () => {
           aria-label="Back"
         >
           <img src={assets.arrow_icon} alt="Back" className='w-6 h-6'/>
-        </button>
-        <button
-          onClick={(e) => {
-            try {
-              e.stopPropagation();
-              e.preventDefault();
-              handleToggleInfo();
-            } catch (error) {
-              console.error('Error toggling info panel:', error);
-            }
-          }}
-          onTouchEnd={(e) => {
-            try {
-              e.stopPropagation();
-              e.preventDefault();
-              handleToggleInfo();
-            } catch (error) {
-              console.error('Error toggling info panel:', error);
-            }
-          }}
-          className='p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex-shrink-0 touch-manipulation'
-          style={{ touchAction: 'manipulation' }}
-          aria-label="Info"
-          type="button"
-        >
-          <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
         </button>
       </div>
 
