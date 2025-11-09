@@ -35,6 +35,7 @@ const ChatContainer = () => {
   const [swipingMessageId, setSwipingMessageId] = useState(null)
   const touchStartRef = useRef({})
   const [showMediaInfo, setShowMediaInfo] = useState(false)
+  const containerSwipeStartRef = useRef(null)
 
   // Typing indicator logic
   useEffect(() => {
@@ -507,6 +508,75 @@ const ChatContainer = () => {
   // Extract media (images) from messages
   const mediaMessages = (messages || []).filter(msg => msg.image).slice(-20)
 
+  // Container swipe handlers for navigation (left swipe to go back)
+  const handleContainerTouchStart = (e) => {
+    // Only handle if touch starts on empty space (background, header area, etc.)
+    // Don't interfere if touching a message, button, input, or other interactive element
+    const target = e.target
+    
+    // Check if touching interactive elements
+    const isButton = target.closest('button, [role="button"]')
+    const isInput = target.closest('input, textarea')
+    const isLink = target.closest('a')
+    const isImage = target.tagName === 'IMG'
+    const isMessage = target.closest('[class*="flex items-end gap-2"]') || // Message container
+                       target.closest('[class*="px-3 py-2 rounded-lg"]') || // Message bubble
+                       target.closest('[class*="relative rounded-lg overflow-hidden"]') // Image message
+    
+    // Only track swipe if not on interactive element, not on message, and not in media view
+    if (!isButton && !isInput && !isLink && !isImage && !isMessage && !showMediaInfo) {
+      const touch = e.touches[0]
+      containerSwipeStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        time: Date.now()
+      }
+    } else {
+      // Clear any existing swipe tracking if touching interactive element
+      containerSwipeStartRef.current = null
+    }
+  }
+
+  const handleContainerTouchMove = (e) => {
+    // Prevent default only if it's a horizontal swipe
+    if (!containerSwipeStartRef.current) return
+    
+    const touch = e.touches[0]
+    const start = containerSwipeStartRef.current
+    const deltaX = touch.clientX - start.x
+    const deltaY = Math.abs(touch.clientY - start.y)
+    
+    // Only prevent default for horizontal swipes (not vertical scrolling)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+      // Allow left swipe (negative deltaX) to navigate back
+      if (deltaX < -20) {
+        e.preventDefault()
+      }
+    }
+  }
+
+  const handleContainerTouchEnd = (e) => {
+    if (!containerSwipeStartRef.current) return
+    
+    const start = containerSwipeStartRef.current
+    const touch = e.changedTouches[0]
+    const deltaX = touch.clientX - start.x
+    const deltaY = Math.abs(touch.clientY - start.y)
+    const deltaTime = Date.now() - start.time
+    
+    // Check if it's a valid left swipe gesture
+    // Left swipe: deltaX is negative, horizontal movement > vertical, fast gesture
+    const isLeftSwipe = deltaX < -100 && Math.abs(deltaX) > Math.abs(deltaY) && deltaTime < 500
+    
+    if (isLeftSwipe && !showMediaInfo) {
+      // Navigate back to home
+      setSelectedUser(null)
+    }
+    
+    // Reset swipe tracking
+    containerSwipeStartRef.current = null
+  }
+
   if (!selectedUser) {
     return (
       <div className='flex flex-col items-center justify-center gap-2 text-gray-500 bg-white/10 max-md:hidden'>
@@ -535,6 +605,9 @@ const ChatContainer = () => {
         backgroundRepeat: 'no-repeat',
         backgroundAttachment: 'scroll'
       }}
+      onTouchStart={handleContainerTouchStart}
+      onTouchMove={handleContainerTouchMove}
+      onTouchEnd={handleContainerTouchEnd}
     >
       {/* Overlay for better readability */}
       <div className='absolute inset-0 bg-black/20 backdrop-blur-sm'></div>
