@@ -609,7 +609,7 @@ const ChatContainer = () => {
       </div>
 
         {/* Messages - WhatsApp Style */}
-        <div className='flex flex-col flex-1 overflow-y-auto px-2 md:px-4 py-2 gap-2 touch-pan-y min-h-0'>
+        <div className='flex flex-col flex-1 overflow-y-auto px-2 md:px-4 py-2 touch-pan-y min-h-0' style={{ gap: '0.5rem' }}>
         {loadingMessages && messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-gray-400">
@@ -735,11 +735,12 @@ const ChatContainer = () => {
               )}
               
             <div 
-                  className={`flex items-end gap-2 w-full ${isOwnMessage ? 'justify-end' : 'justify-start'} relative group`}
+                  className={`flex items-end gap-2 w-full ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
                   style={{
-                    transform: swipeOffset[msg._id || msg.id] ? `translateX(${swipeOffset[msg._id || msg.id]}px)` : 'translateX(0)',
+                    transform: swipeOffset[msg._id || msg.id] ? `translateX(${swipeOffset[msg._id || msg.id]}px)` : 'none',
                     transition: swipingMessageId === (msg._id || msg.id) ? 'none' : 'transform 0.2s ease-out',
-                    zIndex: swipeOffset[msg._id || msg.id] ? 10 : 1
+                    position: swipeOffset[msg._id || msg.id] ? 'relative' : 'static',
+                    zIndex: swipeOffset[msg._id || msg.id] ? 10 : 'auto'
                   }}
                   onMouseEnter={() => setHoveredMessageId(msg._id || msg.id)}
                   onMouseLeave={() => !showDeleteMenu && setHoveredMessageId(null)}
