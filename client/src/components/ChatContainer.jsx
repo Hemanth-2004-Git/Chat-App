@@ -34,6 +34,7 @@ const ChatContainer = () => {
   const [swipeOffset, setSwipeOffset] = useState({})
   const [swipingMessageId, setSwipingMessageId] = useState(null)
   const touchStartRef = useRef({})
+  const [showMediaInfo, setShowMediaInfo] = useState(false)
 
   // Typing indicator logic
   useEffect(() => {
@@ -423,6 +424,8 @@ const ChatContainer = () => {
       const isGroup = selectedUser.isGroup === true;
       // Messages are cleared automatically in getMessages for instant feedback
       getMessages(selectedUser._id, isGroup)
+      // Close media view when user changes
+      setShowMediaInfo(false)
     }
   }, [selectedUser])
 
@@ -472,21 +475,17 @@ const ChatContainer = () => {
     }
   }, [replyingTo])
 
-  // Handle toggle info panel - simplified like three-dot menu
+  // Handle toggle info panel - show media/info view like WhatsApp
   const handleToggleInfo = () => {
     try {
-      // Direct function call (same method as three-dot menu)
-      if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
-        window.toggleInfoPanel();
-      } else if (typeof window !== 'undefined') {
-        // Fallback to CustomEvent
-        const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
-        window.dispatchEvent(event);
-      }
+      setShowMediaInfo(prev => !prev);
     } catch (error) {
       console.error('Error toggling info panel:', error);
     }
   }
+
+  // Extract media (images) from messages
+  const mediaMessages = (messages || []).filter(msg => msg.image).slice(-20)
 
   if (!selectedUser) {
     return (
@@ -547,33 +546,63 @@ const ChatContainer = () => {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            try {
-              e.stopPropagation();
-              e.preventDefault();
-              handleToggleInfo();
-            } catch (error) {
-              console.error('Error in info button click:', error);
-            }
-          }}
-          onTouchEnd={(e) => {
-            try {
-              e.stopPropagation();
-              e.preventDefault();
-              handleToggleInfo();
-            } catch (error) {
-              console.error('Error in info button touch:', error);
-            }
-          }}
-          className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
-          style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
-          title="Media & Info"
-          aria-label="Media & Info"
-        >
-          <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
-        </button>
+        {showMediaInfo ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              try {
+                e.stopPropagation();
+                e.preventDefault();
+                setShowMediaInfo(false);
+              } catch (error) {
+                console.error('Error closing media view:', error);
+              }
+            }}
+            onTouchEnd={(e) => {
+              try {
+                e.stopPropagation();
+                e.preventDefault();
+                setShowMediaInfo(false);
+              } catch (error) {
+                console.error('Error closing media view:', error);
+              }
+            }}
+            className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
+            style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
+            title="Back to Chat"
+            aria-label="Back to Chat"
+          >
+            <img src={assets.arrow_icon} alt="Back" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => {
+              try {
+                e.stopPropagation();
+                e.preventDefault();
+                handleToggleInfo();
+              } catch (error) {
+                console.error('Error in info button click:', error);
+              }
+            }}
+            onTouchEnd={(e) => {
+              try {
+                e.stopPropagation();
+                e.preventDefault();
+                handleToggleInfo();
+              } catch (error) {
+                console.error('Error in info button touch:', error);
+              }
+            }}
+            className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
+            style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
+            title="Media & Info"
+            aria-label="Media & Info"
+          >
+            <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
+          </button>
+        )}
         <button
           onClick={() => setSelectedUser(null)} 
           className='md:hidden p-1.5 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0'
@@ -584,8 +613,72 @@ const ChatContainer = () => {
         </button>
       </div>
 
-        {/* Messages - WhatsApp Style */}
-        <div className='flex flex-col flex-1 overflow-y-auto px-2 md:px-4 py-2 touch-pan-y min-h-0' style={{ gap: '0.5rem' }}>
+        {/* Media/Info View - WhatsApp Style */}
+        {showMediaInfo ? (
+          <div className='flex flex-col flex-1 overflow-y-auto bg-black/20 backdrop-blur-sm'>
+            {/* User Info Section */}
+            <div className='flex flex-col items-center gap-3 py-8 px-4 border-b border-gray-600/30'>
+              <img 
+                src={selectedUser?.profilePic || assets.avatar_icon} 
+                alt={selectedUser?.fullName || selectedUser?.name} 
+                className='w-24 h-24 rounded-full object-cover border-2 border-gray-600'
+                onError={(e) => { e.target.src = assets.avatar_icon; }}
+              />
+              <div className='text-center'>
+                <h2 className='text-xl font-semibold text-white'>
+                  {selectedUser?.fullName || selectedUser?.name || 'Unknown User'}
+                </h2>
+                {!selectedUser?.isGroup && (
+                  <p className='text-sm text-gray-400 mt-1'>
+                    {selectedUser?.bio || 'No status'}
+                  </p>
+                )}
+                {selectedUser?.isGroup && (
+                  <p className='text-sm text-gray-400 mt-1'>
+                    {selectedUser?.members?.length || 0} participants
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Media Section */}
+            <div className='p-4'>
+              <h3 className='text-lg font-semibold text-white mb-4'>Media</h3>
+              {mediaMessages.length > 0 ? (
+                <div className='grid grid-cols-3 gap-2'>
+                  {mediaMessages.map((msg, index) => {
+                    const handleImageClick = () => {
+                      if (msg.image) {
+                        const imageUrl = msg.image;
+                        const urlParts = imageUrl.split('/');
+                        const filename = urlParts[urlParts.length - 1].split('?')[0] || `image-${Date.now()}.jpg`;
+                        setViewingImage({ url: imageUrl, filename });
+                      }
+                    };
+
+                    return (
+                      <div
+                        key={msg._id || msg.id || index}
+                        onClick={handleImageClick}
+                        className='relative aspect-square rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity'
+                      >
+                        <img
+                          src={msg.image}
+                          alt="Media"
+                          className='w-full h-full object-cover'
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className='text-gray-500 text-center py-8'>No media shared</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Messages - WhatsApp Style */
+          <div className='flex flex-col flex-1 overflow-y-auto px-2 md:px-4 py-2 touch-pan-y min-h-0' style={{ gap: '0.5rem' }}>
         {loadingMessages && messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-gray-400">
@@ -1123,8 +1216,10 @@ const ChatContainer = () => {
         
         <div ref={scrollEnd}></div>
       </div>
+        )}
 
-      {/* Input Area */}
+      {/* Input Area - Hidden when showing media/info */}
+      {!showMediaInfo && (
             <div ref={inputAreaRef} className='relative bg-black/20 backdrop-blur-md z-20 flex-shrink-0'>
               {/* Reply/Edit Preview */}
               {(replyingTo || editingMessage) && (
@@ -1275,6 +1370,7 @@ const ChatContainer = () => {
                 )}
               </div>
             </div>
+      )}
       </div>
 
       {/* Forward Message Modal */}
