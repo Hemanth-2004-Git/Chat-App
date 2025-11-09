@@ -472,31 +472,19 @@ const ChatContainer = () => {
     }
   }, [replyingTo])
 
-  // Handle toggle info panel - consolidated function for both click and touch
+  // Handle toggle info panel - simplified like three-dot menu
   const handleToggleInfo = () => {
     try {
-      // Try direct function call first (more reliable for APK)
+      // Direct function call (same method as three-dot menu)
       if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
         window.toggleInfoPanel();
-        return;
-      }
-      
-      // Fallback to CustomEvent
-      if (typeof window !== 'undefined') {
+      } else if (typeof window !== 'undefined') {
+        // Fallback to CustomEvent
         const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
         window.dispatchEvent(event);
       }
     } catch (error) {
       console.error('Error toggling info panel:', error);
-      // Last resort: try to trigger via direct event
-      try {
-        if (typeof window !== 'undefined') {
-          const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
-          window.dispatchEvent(event);
-        }
-      } catch (fallbackError) {
-        console.error('Fallback toggle also failed:', fallbackError);
-      }
     }
   }
 
@@ -537,7 +525,7 @@ const ChatContainer = () => {
       {/* Header */}
         <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm flex-shrink-0 z-20'>
         <div 
-          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer active:opacity-70 transition-opacity py-2 -mx-2 px-2 rounded-lg hover:bg-black/10"
+          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity py-2 -mx-2 px-2 rounded-lg"
           onClick={(e) => {
             try {
               e.stopPropagation();
@@ -547,33 +535,16 @@ const ChatContainer = () => {
               console.error('Error toggling info panel:', error);
             }
           }}
-          onTouchStart={(e) => {
-            try {
-              e.stopPropagation();
-              // Mark touch started for better handling
-              e.currentTarget.style.opacity = '0.7';
-            } catch (error) {
-              console.error('Error in touch start:', error);
-            }
-          }}
           onTouchEnd={(e) => {
             try {
               e.stopPropagation();
               e.preventDefault();
-              e.currentTarget.style.opacity = '1';
               handleToggleInfo();
             } catch (error) {
               console.error('Error toggling info panel:', error);
             }
           }}
-          onTouchCancel={(e) => {
-            try {
-              e.currentTarget.style.opacity = '1';
-            } catch (error) {
-              console.error('Error in touch cancel:', error);
-            }
-          }}
-          style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
+          style={{ touchAction: 'manipulation' }}
         >
           <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0 pointer-events-none" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
           <div className='flex-1 min-w-0'>
