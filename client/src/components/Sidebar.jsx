@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useState, useRef } from 'react';
 import assets from '../assets/assets';
 import { useNavigate } from 'react-router-dom';
-import { authcontext } from '../../context/authcontext';
-import { chatContext } from '../../context/chatcontext';
+import { authcontext } from '../../context/authcontext.jsx';
+import { chatContext } from '../../context/chatcontext.jsx';
 import CreateGroupModal from './CreateGroupModal';
 
 const Sidebar = () => {

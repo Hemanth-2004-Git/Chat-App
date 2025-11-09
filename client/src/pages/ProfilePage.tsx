@@ -2,7 +2,7 @@ import React, { useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import assets from '../assets/assets';
-import { authcontext } from '../../context/authcontext';
+import { authcontext } from '../../context/authcontext.jsx';
 import AvatarCreator from '../components/AvatarCreator';
 import ProfilePicturePicker from '../components/ProfilePicturePicker';
 import ImageWithRetry from '../components/ImageWithRetry';

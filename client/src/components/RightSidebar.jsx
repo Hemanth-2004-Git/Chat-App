@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect } from 'react'
 import assets from '../assets/assets'
-import { authcontext } from '../../context/authcontext'
-import { chatContext } from '../../context/chatcontext'
+import { authcontext } from '../../context/authcontext.jsx'
+import { chatContext } from '../../context/chatcontext.jsx'
 import toast from 'react-hot-toast'
 import ImageViewerModal from './ImageViewerModal'
 

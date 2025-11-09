@@ -3,7 +3,7 @@ import Sidebar from '../components/Sidebar'
 import RightSidebar from '../components/RightSidebar'
 import ChatContainer from '../components/ChatContainer'
 import assets from '../assets/assets'
-import { chatContext } from '../../context/chatcontext'
+import { chatContext } from '../../context/chatcontext.jsx'
 
 // Extend Window interface for toggleInfoPanel
 declare global {

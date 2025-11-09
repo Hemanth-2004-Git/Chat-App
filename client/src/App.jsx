@@ -5,7 +5,7 @@ import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import ProfilePage from './pages/ProfilePage'
 import {Toaster} from "react-hot-toast"
-import { authcontext } from '../context/authcontext'
+import { authcontext } from '../context/authcontext.jsx'
 
 const App = () => {
   const { authuser, isLoading } = useContext(authcontext)

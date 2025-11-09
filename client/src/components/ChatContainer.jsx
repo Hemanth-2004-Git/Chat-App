@@ -1,8 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react'
 import assets from '../assets/assets'
 import { formatMessageTime, formatMessageDate } from '../libs/utils'
-import { chatContext } from '../../context/chatcontext'
-import { authcontext } from '../../context/authcontext'
+import { chatContext } from '../../context/chatcontext.jsx'
+import { authcontext } from '../../context/authcontext.jsx'
 import { useContext } from 'react'
 import { toast } from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
@@ -164,6 +164,17 @@ const ChatContainer = () => {
   const handleSendMessage = async () => {
     if(!input.trim()) {
       toast.error("Message cannot be empty")
+      return
+    }
+    
+    // Safety check: ensure selectedUser and sendMessage exist
+    if (!selectedUser) {
+      toast.error("Please select a user to send a message")
+      return
+    }
+    
+    if (!sendMessage || typeof sendMessage !== 'function') {
+      toast.error("Message sending is not available")
       return
     }
     
@@ -482,7 +493,7 @@ const ChatContainer = () => {
 
   return (
     <div 
-      className='h-full overflow-scroll relative'
+      className='h-full flex flex-col relative overflow-hidden'
       style={{
         backgroundImage: `url(${assets.bgImage})`,
         backgroundSize: 'cover',
@@ -495,20 +506,20 @@ const ChatContainer = () => {
       <div className='absolute inset-0 bg-black/20 backdrop-blur-sm'></div>
       
       {/* Content with relative positioning */}
-      <div className='relative z-10 h-full'>
+      <div className='relative z-10 flex-1 flex flex-col overflow-hidden'>
       {/* Header */}
-        <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm sticky top-0 z-20'>
+        <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm flex-shrink-0 z-20'>
         <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
         <div className='flex-1 min-w-0'>
           <p className='text-base md:text-lg text-white flex items-center gap-2 truncate'>
             {selectedUser?.fullName || selectedUser?.name || 'Unknown User'}
-            {!selectedUser?.isGroup && selectedUser?._id && onlineUsers?.includes(selectedUser._id) && (
+            {!selectedUser?.isGroup && selectedUser?._id && Array.isArray(onlineUsers) && onlineUsers.includes(selectedUser._id) && (
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>
             )}
           </p>
           {!selectedUser?.isGroup && (
             <p className='text-xs text-gray-400'>
-              {selectedUser?._id && (onlineUsers?.includes(selectedUser._id) || onlineUsers?.includes(selectedUser.uid) || onlineUsers?.includes(selectedUser.id)) ? (
+              {selectedUser?._id && Array.isArray(onlineUsers) && (onlineUsers.includes(selectedUser._id) || onlineUsers.includes(selectedUser.uid) || onlineUsers.includes(selectedUser.id)) ? (
                 <span className="text-green-400">online</span>
               ) : (
                 <span className="text-gray-500">offline</span>
@@ -572,7 +583,7 @@ const ChatContainer = () => {
       </div>
 
         {/* Messages - WhatsApp Style */}
-        <div className='flex flex-col h-[calc(100%-120px)] md:h-[calc(100%-140px)] overflow-y-auto px-2 md:px-4 py-2 gap-1 touch-pan-y'>
+        <div className='flex flex-col flex-1 overflow-y-auto px-2 md:px-4 py-2 gap-2 touch-pan-y min-h-0'>
         {loadingMessages && messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-gray-400">
@@ -580,15 +591,31 @@ const ChatContainer = () => {
               <p className="text-sm">Loading messages...</p>
             </div>
           </div>
-        ) : messages && messages.length > 0 ? messages.map((msg, index) => {
+        ) : messages && messages.length > 0 ? (() => {
+          // Remove duplicates based on message ID
+          const seenIds = new Set();
+          const uniqueMessages = messages.filter(msg => {
+            const msgId = msg._id || msg.id;
+            if (!msgId || seenIds.has(msgId)) {
+              return false;
+            }
+            seenIds.add(msgId);
+            return true;
+          });
+          
+          return uniqueMessages.map((msg, index) => {
           // SAFE CHECK: Ensure message has required properties
           try {
             if (!msg || typeof msg !== 'object') return null
           
             // Check if message is from current user - compare as strings to handle ID mismatches
-            const currentUserId = String(authuser?._id || authuser?.uid || '');
-            const messageSenderId = String(msg.senderId || '');
-            const isOwnMessage = messageSenderId === currentUserId && currentUserId !== '';
+            const currentUserId = authuser?._id || authuser?.uid || '';
+            const messageSenderId = msg.senderId || '';
+            // Compare both as strings, but also handle empty strings and null values
+            const isOwnMessage = currentUserId && messageSenderId && (
+              String(currentUserId) === String(messageSenderId) ||
+              currentUserId === messageSenderId
+            );
             const isGroup = selectedUser?.isGroup === true;
             const isSystemMessage = msg.type === 'system' || msg.senderId === 'system';
                   
@@ -682,16 +709,17 @@ const ChatContainer = () => {
               )}
               
             <div 
-                  className={`flex items-end gap-2 w-full mb-2 ${isOwnMessage ? 'justify-end' : 'justify-start'} relative group overflow-hidden`}
+                  className={`flex items-end gap-2 w-full ${isOwnMessage ? 'justify-end' : 'justify-start'} relative group`}
+                  style={{
+                    transform: swipeOffset[msg._id || msg.id] ? `translateX(${swipeOffset[msg._id || msg.id]}px)` : 'translateX(0)',
+                    transition: swipingMessageId === (msg._id || msg.id) ? 'none' : 'transform 0.2s ease-out',
+                    zIndex: swipeOffset[msg._id || msg.id] ? 10 : 1
+                  }}
                   onMouseEnter={() => setHoveredMessageId(msg._id || msg.id)}
                   onMouseLeave={() => !showDeleteMenu && setHoveredMessageId(null)}
                   onTouchStart={(e) => handleTouchStart(e, msg._id || msg.id)}
                   onTouchMove={(e) => handleTouchMove(e, msg._id || msg.id, isOwnMessage)}
                   onTouchEnd={(e) => handleTouchEnd(e, msg._id || msg.id, msg, isOwnMessage)}
-                  style={{
-                    transform: swipeOffset[msg._id || msg.id] ? `translateX(${swipeOffset[msg._id || msg.id]}px)` : 'translateX(0)',
-                    transition: swipingMessageId === (msg._id || msg.id) ? 'none' : 'transform 0.2s ease-out'
-                  }}
                 >
                   {/* Swipe indicator */}
                   {swipeOffset[msg._id || msg.id] && Math.abs(swipeOffset[msg._id || msg.id]) > 30 && (
@@ -768,7 +796,7 @@ const ChatContainer = () => {
                     <div className={`absolute bottom-1 right-2 flex items-center gap-1`}>
                       <span className='text-[10px] text-white/80'>{messageTime}</span>
                       {isOwnMessage && !isGroup && (
-                        (onlineUsers.includes(selectedUser?._id) || onlineUsers.includes(selectedUser?.uid) || onlineUsers.includes(selectedUser?.id)) ? (
+                        (Array.isArray(onlineUsers) && (onlineUsers.includes(selectedUser?._id) || onlineUsers.includes(selectedUser?.uid) || onlineUsers.includes(selectedUser?.id))) ? (
                           <span className='text-white/80 text-xs'>✓✓</span>
                         ) : (
                           <span className='text-white/60 text-xs'>✓</span>
@@ -1062,7 +1090,8 @@ const ChatContainer = () => {
             console.error('Error rendering message:', error, msg);
             return null; // Return null to skip this message if there's an error
           }
-        }) : (
+          });
+        })() : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
             <p>No messages yet. Start a conversation!</p>
           </div>
@@ -1093,7 +1122,7 @@ const ChatContainer = () => {
       </div>
 
       {/* Input Area */}
-            <div ref={inputAreaRef} className='absolute bottom-0 left-0 right-0 bg-black/20 backdrop-blur-md z-20'>
+            <div ref={inputAreaRef} className='relative bg-black/20 backdrop-blur-md z-20 flex-shrink-0'>
               {/* Reply/Edit Preview */}
               {(replyingTo || editingMessage) && (
                 <div className='px-4 pt-3 pb-2.5 border-b border-gray-700/50 bg-black/10 backdrop-blur-sm'>
