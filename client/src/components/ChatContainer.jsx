@@ -566,44 +566,63 @@ const ChatContainer = () => {
             </p>
           )}
         </div>
-        {!showMediaInfo && (
+        {showMediaInfo ? (
+          // Back button for desktop when viewing media/info
           <button
             type="button"
             onClick={(e) => {
               try {
                 e.stopPropagation();
                 e.preventDefault();
-                handleToggleInfo();
+                setShowMediaInfo(false);
               } catch (error) {
-                console.error('Error in info button click:', error);
+                console.error('Error closing media view:', error);
               }
             }}
-            onTouchEnd={(e) => {
-              try {
-                e.stopPropagation();
-                e.preventDefault();
-                handleToggleInfo();
-              } catch (error) {
-                console.error('Error in info button touch:', error);
-              }
-            }}
-            className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
-            style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
-            title="Media & Info"
-            aria-label="Media & Info"
+            className="hidden md:flex p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity items-center justify-center w-9 h-9 md:w-10 md:h-10 flex-shrink-0"
+            title="Back to Chat"
+            aria-label="Back to Chat"
           >
-            <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
+            <img src={assets.arrow_icon} alt="Back" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
           </button>
-        )}
-        {!showMediaInfo && (
-          <button
-            onClick={() => setSelectedUser(null)} 
-            className='md:hidden p-1.5 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0'
-            style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
-            aria-label="Back"
-          >
-            <img src={assets.arrow_icon} alt="Back" className='w-5 h-5 md:w-6 md:h-6'/>
-          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={(e) => {
+                try {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleToggleInfo();
+                } catch (error) {
+                  console.error('Error in info button click:', error);
+                }
+              }}
+              onTouchEnd={(e) => {
+                try {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleToggleInfo();
+                } catch (error) {
+                  console.error('Error in info button touch:', error);
+                }
+              }}
+              className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
+              style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
+              title="Media & Info"
+              aria-label="Media & Info"
+            >
+              <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
+            </button>
+            <button
+              onClick={() => setSelectedUser(null)} 
+              className='md:hidden p-1.5 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0'
+              style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
+              aria-label="Back"
+            >
+              <img src={assets.arrow_icon} alt="Back" className='w-5 h-5 md:w-6 md:h-6'/>
+            </button>
+          </>
         )}
       </div>
 

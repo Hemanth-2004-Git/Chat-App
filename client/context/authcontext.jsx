@@ -52,14 +52,10 @@ export const AuthContextProvider = ({ children }) => {
       async (error) => {
         if (error.response?.status === 401) {
           // Token expired or invalid, clear auth
+          console.warn("⚠️ 401 Unauthorized - Token expired or invalid");
           localStorage.removeItem("authToken");
-          setUser(null);
-          setSocket((prevSocket) => {
-            if (prevSocket) {
-              prevSocket.disconnect();
-            }
-            return null;
-          });
+          // Note: State updates should be handled in the component/context, not here
+          // The error will be caught by the calling code which can handle state updates
         }
         return Promise.reject(error);
       }
@@ -156,6 +152,25 @@ export const AuthContextProvider = ({ children }) => {
           }
         } catch (err) {
           console.error("Auth context error:", err);
+          console.error("Error details:", {
+            message: err.message,
+            response: err.response?.data,
+            status: err.response?.status,
+            url: err.config?.url,
+            baseURL: err.config?.baseURL
+          });
+          
+          // More specific error handling
+          if (err.response?.status === 401) {
+            console.warn("⚠️ Authentication failed - Token expired or invalid");
+            console.warn("💡 User needs to log in again");
+          } else if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+            console.error("❌ Network error - Backend server may not be running");
+            console.error("💡 Check if backend server is running on:", API_URL);
+          } else if (err.response?.status === 404) {
+            console.error("❌ Route not found - Check backend routes");
+          }
+          
           setUser(null);
           localStorage.removeItem("authToken");
           setOnlineUsers([]);
