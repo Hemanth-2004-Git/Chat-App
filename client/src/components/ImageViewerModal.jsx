@@ -60,105 +60,99 @@ const ImageViewerModal = ({ isOpen, onClose, imageUrl, imageName = 'image' }) =>
       
       // For Android APK/WebView, use a more reliable method
       if (isWebView && /Android/i.test(navigator.userAgent)) {
-        // Method 1: Try to convert to base64 data URI and download
+        // For Android WebView, try multiple methods
         try {
-          // Fetch the image
-          const response = await fetch(imageUrl, {
-            mode: 'cors',
-            credentials: 'omit'
-          })
+          // Method 1: Try canvas approach first (most reliable for WebView)
+          const img = new Image()
+          img.crossOrigin = 'anonymous'
           
-          if (!response.ok) {
-            throw new Error('Failed to fetch image')
-          }
-          
-          const blob = await response.blob()
-          
-          // Convert blob to base64
-          const reader = new FileReader()
-          const base64Data = await new Promise((resolve, reject) => {
-            reader.onloadend = () => resolve(reader.result)
-            reader.onerror = reject
-            reader.readAsDataURL(blob)
-          })
-          
-          // Create a link with data URI (more reliable for Android WebView)
-          const link = document.createElement('a')
-          link.href = base64Data
-          link.download = filename
-          link.style.display = 'none'
-          document.body.appendChild(link)
-          
-          // Trigger download
-          link.click()
-          
-          // Cleanup
-          setTimeout(() => {
-            try {
-              document.body.removeChild(link)
-            } catch (e) {
-              // Link might have been removed
-            }
-          }, 1000)
-          
-          toast.success('Image download started!')
-        } catch (fetchError) {
-          console.log('Base64 method failed, trying canvas...', fetchError)
-          
-          // Method 2: Use canvas to convert image
-          try {
-            const img = new Image()
-            img.crossOrigin = 'anonymous'
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Timeout')), 15000)
             
-            await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error('Timeout')), 10000)
-              
-              img.onload = () => {
-                clearTimeout(timeout)
+            img.onload = () => {
+              clearTimeout(timeout)
+              try {
+                const canvas = document.createElement('canvas')
+                canvas.width = img.naturalWidth
+                canvas.height = img.naturalHeight
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(img, 0, 0)
+                
+                // Convert to data URI
+                const dataUri = canvas.toDataURL('image/jpeg', 0.95)
+                
+                // Try method 1: Direct download with data URI
                 try {
-                  const canvas = document.createElement('canvas')
-                  canvas.width = img.naturalWidth
-                  canvas.height = img.naturalHeight
-                  const ctx = canvas.getContext('2d')
-                  ctx.drawImage(img, 0, 0)
-                  
-                  // Convert to data URI
-                  const dataUri = canvas.toDataURL('image/jpeg', 0.95)
-                  
-                  // Create download link with data URI
                   const link = document.createElement('a')
                   link.href = dataUri
                   link.download = filename
                   link.style.display = 'none'
                   document.body.appendChild(link)
-                  link.click()
+                  
+                  // Use both click and programmatic trigger
+                  setTimeout(() => {
+                    link.click()
+                    // Also try dispatching a click event
+                    const clickEvent = new MouseEvent('click', {
+                      bubbles: true,
+                      cancelable: true,
+                      view: window
+                    })
+                    link.dispatchEvent(clickEvent)
+                  }, 100)
                   
                   setTimeout(() => {
                     try {
                       document.body.removeChild(link)
                     } catch (e) {}
-                  }, 1000)
+                  }, 2000)
                   
-                  toast.success('Image download started!')
+                  toast.success('Downloading image...')
                   resolve()
-                } catch (error) {
-                  reject(error)
+                } catch (linkError) {
+                  // Method 2: Open in new window with data URI
+                  console.log('Direct download failed, opening in new window...', linkError)
+                  const newWindow = window.open('', '_blank')
+                  if (newWindow) {
+                    newWindow.document.write(`
+                      <html>
+                        <head><title>${filename}</title></head>
+                        <body style="margin:0;padding:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;">
+                          <img src="${dataUri}" style="max-width:100%;max-height:100%;object-fit:contain;" />
+                          <script>
+                            setTimeout(() => {
+                              const link = document.createElement('a');
+                              link.href = '${dataUri}';
+                              link.download = '${filename}';
+                              link.click();
+                            }, 500);
+                          </script>
+                        </body>
+                      </html>
+                    `)
+                    toast.success('Image opened. Long press to save.')
+                    resolve()
+                  } else {
+                    throw new Error('Popup blocked')
+                  }
                 }
+              } catch (error) {
+                reject(error)
               }
-              
-              img.onerror = () => {
-                clearTimeout(timeout)
-                reject(new Error('Failed to load image'))
-              }
-              
-              img.src = imageUrl
-            })
-          } catch (canvasError) {
-            console.log('Canvas method failed, opening in new tab...', canvasError)
-            // Final fallback: open original URL
-            window.open(imageUrl, '_blank')
-            toast.success('Image opened. Long press to save to gallery.')
-          }
+            }
+            
+            img.onerror = () => {
+              clearTimeout(timeout)
+              reject(new Error('Failed to load image'))
+            }
+            
+            img.src = imageUrl
+          })
+        } catch (error) {
+          console.log('All methods failed, opening original URL...', error)
+          // Final fallback: open original URL
+          window.open(imageUrl, '_blank')
+          toast.success('Image opened. Long press to save to gallery.')
         }
       } else {
         // For other platforms (desktop, iOS, regular mobile browsers)

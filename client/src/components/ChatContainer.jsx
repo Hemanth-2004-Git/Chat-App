@@ -471,6 +471,15 @@ const ChatContainer = () => {
     )
   }
 
+  // Safety check - prevent crash if selectedUser is null
+  if (!selectedUser) {
+    return (
+      <div className='h-full flex items-center justify-center text-gray-400'>
+        <p>Select a chat to start messaging</p>
+      </div>
+    )
+  }
+
   return (
     <div 
       className='h-full overflow-scroll relative'
@@ -489,26 +498,26 @@ const ChatContainer = () => {
       <div className='relative z-10 h-full'>
       {/* Header */}
         <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm sticky top-0 z-20'>
-        <img src={selectedUser.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0"/>
+        <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
         <div className='flex-1 min-w-0'>
           <p className='text-base md:text-lg text-white flex items-center gap-2 truncate'>
-            {selectedUser.fullName}
-            {!selectedUser.isGroup && onlineUsers.includes(selectedUser._id) && (
+            {selectedUser?.fullName || selectedUser?.name || 'Unknown User'}
+            {!selectedUser?.isGroup && selectedUser?._id && onlineUsers?.includes(selectedUser._id) && (
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>
             )}
           </p>
-          {!selectedUser.isGroup && (
+          {!selectedUser?.isGroup && (
             <p className='text-xs text-gray-400'>
-              {onlineUsers.includes(selectedUser._id) || onlineUsers.includes(selectedUser.uid) || onlineUsers.includes(selectedUser.id) ? (
+              {selectedUser?._id && (onlineUsers?.includes(selectedUser._id) || onlineUsers?.includes(selectedUser.uid) || onlineUsers?.includes(selectedUser.id)) ? (
                 <span className="text-green-400">online</span>
               ) : (
                 <span className="text-gray-500">offline</span>
               )}
             </p>
           )}
-          {selectedUser.isGroup && (
+          {selectedUser?.isGroup && (
             <p className='text-xs text-gray-400'>
-              {selectedUser.members?.length || 0} participants
+              {selectedUser?.members?.length || 0} participants
             </p>
           )}
         </div>
@@ -521,21 +530,42 @@ const ChatContainer = () => {
         </button>
         <button
           onClick={(e) => {
-            e.stopPropagation();
-            // Toggle right sidebar via parent component
-            const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
-            window.dispatchEvent(event);
-            setShowInfo(!showInfo)
+            try {
+              e.stopPropagation();
+              e.preventDefault();
+              // Try direct function call first (more reliable for APK)
+              if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
+                window.toggleInfoPanel();
+              } else {
+                // Fallback to CustomEvent
+                const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
+                window.dispatchEvent(event);
+              }
+              setShowInfo(!showInfo)
+            } catch (error) {
+              console.error('Error toggling info panel:', error);
+            }
           }}
           onTouchStart={(e) => {
-            e.stopPropagation();
-            // Toggle right sidebar via parent component
-            const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
-            window.dispatchEvent(event);
-            setShowInfo(!showInfo)
+            try {
+              e.stopPropagation();
+              e.preventDefault();
+              // Try direct function call first (more reliable for APK)
+              if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
+                window.toggleInfoPanel();
+              } else {
+                // Fallback to CustomEvent
+                const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
+                window.dispatchEvent(event);
+              }
+              setShowInfo(!showInfo)
+            } catch (error) {
+              console.error('Error toggling info panel:', error);
+            }
           }}
           className='p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex-shrink-0 touch-manipulation'
           aria-label="Info"
+          type="button"
         >
           <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6'/>
         </button>
@@ -552,20 +582,21 @@ const ChatContainer = () => {
           </div>
         ) : messages && messages.length > 0 ? messages.map((msg, index) => {
           // SAFE CHECK: Ensure message has required properties
-          if (!msg || typeof msg !== 'object') return null
+          try {
+            if (!msg || typeof msg !== 'object') return null
           
-          // Check if message is from current user - compare as strings to handle ID mismatches
-                  const currentUserId = String(authuser?._id || authuser?.uid || '');
-                  const messageSenderId = String(msg.senderId || '');
-                  const isOwnMessage = messageSenderId === currentUserId && currentUserId !== '';
-                  const isGroup = selectedUser?.isGroup === true;
-                  const isSystemMessage = msg.type === 'system' || msg.senderId === 'system';
+            // Check if message is from current user - compare as strings to handle ID mismatches
+            const currentUserId = String(authuser?._id || authuser?.uid || '');
+            const messageSenderId = String(msg.senderId || '');
+            const isOwnMessage = messageSenderId === currentUserId && currentUserId !== '';
+            const isGroup = selectedUser?.isGroup === true;
+            const isSystemMessage = msg.type === 'system' || msg.senderId === 'system';
                   
-          const messageText = msg.text || ''
-          const messageImage = msg.image
-          const messageTime = msg.createdAt ? formatMessageTime(msg.createdAt) : (msg.timestamp ? formatMessageTime(msg.timestamp) : '')
-          const messageDate = msg.createdAt || msg.timestamp
-          const senderName = isGroup && !isOwnMessage ? (msg.senderName || 'Unknown') : null
+            const messageText = msg.text || ''
+            const messageImage = msg.image
+            const messageTime = msg.createdAt ? formatMessageTime(msg.createdAt) : (msg.timestamp ? formatMessageTime(msg.timestamp) : '')
+            const messageDate = msg.createdAt || msg.timestamp
+            const senderName = isGroup && !isOwnMessage ? (msg.senderName || 'Unknown') : null
           
           // Check if we need to show a date separator
           const showDateSeparator = (() => {
@@ -1026,7 +1057,11 @@ const ChatContainer = () => {
               )}
             </div>
             </React.Fragment>
-          )
+            )
+          } catch (error) {
+            console.error('Error rendering message:', error, msg);
+            return null; // Return null to skip this message if there's an error
+          }
         }) : (
           <div className="flex-1 flex items-center justify-center text-gray-500">
             <p>No messages yet. Start a conversation!</p>

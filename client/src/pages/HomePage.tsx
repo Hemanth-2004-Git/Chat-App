@@ -5,22 +5,45 @@ import ChatContainer from '../components/ChatContainer'
 import assets from '../assets/assets'
 import { chatContext } from '../../context/chatcontext'
 
+// Extend Window interface for toggleInfoPanel
+declare global {
+  interface Window {
+    toggleInfoPanel?: () => void
+  }
+}
+
 const HomePage = () => {
   const [showInfoPanel, setShowInfoPanel] = useState(false)
-  const previousSelectedUserIdRef = useRef(null)
+  const previousSelectedUserIdRef = useRef<string | null>(null)
+  const toggleInfoRef = useRef<(() => void) | null>(null)
   const { selectedUser: contextSelectedUser, messages } = useContext(chatContext)
 
-  // Listen for info icon click
+  // Create toggle function and store it globally for direct access
   useEffect(() => {
-    const handleToggleInfo = () => {
+    const toggleInfo = () => {
       if (contextSelectedUser) {
         setShowInfoPanel(prev => !prev)
       }
+    }
+    
+    toggleInfoRef.current = toggleInfo
+    // Also store on window for direct access (fallback for APK)
+    if (typeof window !== 'undefined') {
+      // @ts-ignore - Adding function to window for APK compatibility
+      window.toggleInfoPanel = toggleInfo
+    }
+
+    // Listen for info icon click via CustomEvent (primary method)
+    const handleToggleInfo = () => {
+      toggleInfo()
     }
 
     window.addEventListener('toggleInfo', handleToggleInfo)
     return () => {
       window.removeEventListener('toggleInfo', handleToggleInfo)
+      if (typeof window !== 'undefined' && 'toggleInfoPanel' in window) {
+        delete window.toggleInfoPanel
+      }
     }
   }, [contextSelectedUser])
 

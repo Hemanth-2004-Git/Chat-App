@@ -106,12 +106,22 @@ const Sidebar = () => {
                                     <button
                                         type="button"
                                         onClick={(e) => {
-                                            e.stopPropagation();
-                                            setShowMenu(!showMenu);
+                                            try {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                setShowMenu(!showMenu);
+                                            } catch (error) {
+                                                console.error('Error in menu button click:', error);
+                                            }
                                         }}
                                         onTouchStart={(e) => {
-                                            e.stopPropagation();
-                                            setShowMenu(!showMenu);
+                                            try {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                setShowMenu(!showMenu);
+                                            } catch (error) {
+                                                console.error('Error in menu button touch:', error);
+                                            }
                                         }}
                                         className="p-1.5 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-8 h-8 touch-manipulation"
                                         title="Menu"
@@ -124,14 +134,24 @@ const Sidebar = () => {
                                         <div className="absolute top-full right-0 z-50 w-32 p-3 rounded-md bg-[#282142] border border-gray-600 text-gray-100 shadow-lg mt-1">
                                             <p
                                                 onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMenu(false);
-                                                    navigate('/profile');
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMenu(false);
+                                                        navigate('/profile');
+                                                    } catch (error) {
+                                                        console.error('Error navigating to profile:', error);
+                                                    }
                                                 }}
                                                 onTouchStart={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMenu(false);
-                                                    navigate('/profile');
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMenu(false);
+                                                        navigate('/profile');
+                                                    } catch (error) {
+                                                        console.error('Error navigating to profile:', error);
+                                                    }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-purple-400 active:text-purple-300 py-1 touch-manipulation"
                                             >
@@ -140,14 +160,24 @@ const Sidebar = () => {
                                             <hr className="my-2 border-t border-gray-500" />
                                             <p 
                                                 onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMenu(false);
-                                                    logout();
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMenu(false);
+                                                        logout();
+                                                    } catch (error) {
+                                                        console.error('Error logging out:', error);
+                                                    }
                                                 }}
                                                 onTouchStart={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMenu(false);
-                                                    logout();
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMenu(false);
+                                                        logout();
+                                                    } catch (error) {
+                                                        console.error('Error logging out:', error);
+                                                    }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-red-400 active:text-red-300 py-1 touch-manipulation"
                                             >
@@ -173,12 +203,22 @@ const Sidebar = () => {
                                     <button
                                         type="button"
                                         onClick={(e) => {
-                                            e.stopPropagation();
-                                            setShowMainMenu(!showMainMenu);
+                                            try {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                setShowMainMenu(!showMainMenu);
+                                            } catch (error) {
+                                                console.error('Error in main menu button click:', error);
+                                            }
                                         }}
                                         onTouchStart={(e) => {
-                                            e.stopPropagation();
-                                            setShowMainMenu(!showMainMenu);
+                                            try {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                setShowMainMenu(!showMainMenu);
+                                            } catch (error) {
+                                                console.error('Error in main menu button touch:', error);
+                                            }
                                         }}
                                         className="p-1.5 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-8 h-8 touch-manipulation"
                                         title="Menu"
@@ -193,14 +233,24 @@ const Sidebar = () => {
                                         <div className="absolute top-full right-0 z-50 w-32 p-3 rounded-md bg-[#282142] border border-gray-600 text-gray-100 shadow-lg mt-1">
                                             <p
                                                 onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMainMenu(false);
-                                                    navigate('/profile');
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMainMenu(false);
+                                                        navigate('/profile');
+                                                    } catch (error) {
+                                                        console.error('Error navigating to profile:', error);
+                                                    }
                                                 }}
                                                 onTouchStart={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMainMenu(false);
-                                                    navigate('/profile');
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMainMenu(false);
+                                                        navigate('/profile');
+                                                    } catch (error) {
+                                                        console.error('Error navigating to profile:', error);
+                                                    }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-purple-400 active:text-purple-300 py-1 touch-manipulation"
                                             >
@@ -209,14 +259,24 @@ const Sidebar = () => {
                                             <hr className="my-2 border-t border-gray-500" />
                                             <p 
                                                 onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMainMenu(false);
-                                                    logout();
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMainMenu(false);
+                                                        logout();
+                                                    } catch (error) {
+                                                        console.error('Error logging out:', error);
+                                                    }
                                                 }}
                                                 onTouchStart={(e) => {
-                                                    e.stopPropagation();
-                                                    setShowMainMenu(false);
-                                                    logout();
+                                                    try {
+                                                        e.stopPropagation();
+                                                        e.preventDefault();
+                                                        setShowMainMenu(false);
+                                                        logout();
+                                                    } catch (error) {
+                                                        console.error('Error logging out:', error);
+                                                    }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-red-400 active:text-red-300 py-1 touch-manipulation"
                                             >
