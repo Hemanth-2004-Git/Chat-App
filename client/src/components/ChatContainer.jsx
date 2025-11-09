@@ -523,32 +523,10 @@ const ChatContainer = () => {
       {/* Content with relative positioning */}
       <div className='relative z-10 flex-1 flex flex-col overflow-hidden'>
       {/* Header */}
-        <div className='flex items-center gap-3 py-3 px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm flex-shrink-0 z-20'>
-        <div 
-          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity py-2 -mx-2 px-2 rounded-lg"
-          onClick={(e) => {
-            try {
-              e.stopPropagation();
-              e.preventDefault();
-              handleToggleInfo();
-            } catch (error) {
-              console.error('Error toggling info panel:', error);
-            }
-          }}
-          onTouchEnd={(e) => {
-            try {
-              e.stopPropagation();
-              e.preventDefault();
-              handleToggleInfo();
-            } catch (error) {
-              console.error('Error toggling info panel:', error);
-            }
-          }}
-          style={{ touchAction: 'manipulation' }}
-        >
-          <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0 pointer-events-none" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
-          <div className='flex-1 min-w-0'>
-          <p className='text-base md:text-lg text-white flex items-center gap-2 truncate'>
+        <div className='flex items-center gap-2 md:gap-3 py-2 md:py-3 px-2 md:px-4 border-b border-stone-500/50 bg-black/10 backdrop-blur-sm flex-shrink-0 z-20'>
+        <img src={selectedUser?.profilePic || assets.avatar_icon} alt="" className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0" onError={(e) => { e.target.src = assets.avatar_icon; }}/>
+        <div className='flex-1 min-w-0'>
+          <p className='text-sm md:text-base lg:text-lg text-white flex items-center gap-2 truncate'>
             {selectedUser?.fullName || selectedUser?.name || 'Unknown User'}
             {!selectedUser?.isGroup && selectedUser?._id && Array.isArray(onlineUsers) && onlineUsers.includes(selectedUser._id) && (
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>
@@ -568,14 +546,41 @@ const ChatContainer = () => {
               {selectedUser?.members?.length || 0} participants
             </p>
           )}
-          </div>
         </div>
         <button
+          type="button"
+          onClick={(e) => {
+            try {
+              e.stopPropagation();
+              e.preventDefault();
+              handleToggleInfo();
+            } catch (error) {
+              console.error('Error in info button click:', error);
+            }
+          }}
+          onTouchEnd={(e) => {
+            try {
+              e.stopPropagation();
+              e.preventDefault();
+              handleToggleInfo();
+            } catch (error) {
+              console.error('Error in info button touch:', error);
+            }
+          }}
+          className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
+          style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
+          title="Media & Info"
+          aria-label="Media & Info"
+        >
+          <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
+        </button>
+        <button
           onClick={() => setSelectedUser(null)} 
-          className='md:hidden p-1 cursor-pointer hover:opacity-80 transition-opacity'
+          className='md:hidden p-1.5 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0'
+          style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
           aria-label="Back"
         >
-          <img src={assets.arrow_icon} alt="Back" className='w-6 h-6'/>
+          <img src={assets.arrow_icon} alt="Back" className='w-5 h-5 md:w-6 md:h-6'/>
         </button>
       </div>
 
