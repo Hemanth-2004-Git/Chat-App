@@ -114,7 +114,7 @@ const Sidebar = () => {
                                                 console.error('Error in menu button click:', error);
                                             }
                                         }}
-                                        onTouchStart={(e) => {
+                                        onTouchEnd={(e) => {
                                             try {
                                                 e.stopPropagation();
                                                 e.preventDefault();
@@ -124,9 +124,10 @@ const Sidebar = () => {
                                             }
                                         }}
                                         className="p-1.5 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-8 h-8 touch-manipulation"
+                                        style={{ touchAction: 'manipulation' }}
                                         title="Menu"
                                     >
-                                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                        <svg className="w-5 h-5 text-white pointer-events-none" fill="currentColor" viewBox="0 0 24 24">
                                             <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
                                         </svg>
                                     </button>
@@ -143,7 +144,7 @@ const Sidebar = () => {
                                                         console.error('Error navigating to profile:', error);
                                                     }
                                                 }}
-                                                onTouchStart={(e) => {
+                                                onTouchEnd={(e) => {
                                                     try {
                                                         e.stopPropagation();
                                                         e.preventDefault();
@@ -154,6 +155,7 @@ const Sidebar = () => {
                                                     }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-purple-400 active:text-purple-300 py-1 touch-manipulation"
+                                                style={{ touchAction: 'manipulation' }}
                                             >
                                                 Edit Profile
                                             </p>
@@ -169,7 +171,7 @@ const Sidebar = () => {
                                                         console.error('Error logging out:', error);
                                                     }
                                                 }}
-                                                onTouchStart={(e) => {
+                                                onTouchEnd={(e) => {
                                                     try {
                                                         e.stopPropagation();
                                                         e.preventDefault();
@@ -180,6 +182,7 @@ const Sidebar = () => {
                                                     }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-red-400 active:text-red-300 py-1 touch-manipulation"
+                                                style={{ touchAction: 'manipulation' }}
                                             >
                                                 Logout
                                             </p>
@@ -211,7 +214,7 @@ const Sidebar = () => {
                                                 console.error('Error in main menu button click:', error);
                                             }
                                         }}
-                                        onTouchStart={(e) => {
+                                        onTouchEnd={(e) => {
                                             try {
                                                 e.stopPropagation();
                                                 e.preventDefault();
@@ -221,12 +224,13 @@ const Sidebar = () => {
                                             }
                                         }}
                                         className="p-1.5 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-8 h-8 touch-manipulation"
+                                        style={{ touchAction: 'manipulation' }}
                                         title="Menu"
                                     >
                                         <img
                                             src={assets.menu_icon}
                                             alt="Menu"
-                                            className="w-5 h-5 object-contain"
+                                            className="w-5 h-5 object-contain pointer-events-none"
                                         />
                                     </button>
                                     {showMainMenu && (
@@ -242,7 +246,7 @@ const Sidebar = () => {
                                                         console.error('Error navigating to profile:', error);
                                                     }
                                                 }}
-                                                onTouchStart={(e) => {
+                                                onTouchEnd={(e) => {
                                                     try {
                                                         e.stopPropagation();
                                                         e.preventDefault();
@@ -253,6 +257,7 @@ const Sidebar = () => {
                                                     }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-purple-400 active:text-purple-300 py-1 touch-manipulation"
+                                                style={{ touchAction: 'manipulation' }}
                                             >
                                                 Edit Profile
                                             </p>
@@ -268,7 +273,7 @@ const Sidebar = () => {
                                                         console.error('Error logging out:', error);
                                                     }
                                                 }}
-                                                onTouchStart={(e) => {
+                                                onTouchEnd={(e) => {
                                                     try {
                                                         e.stopPropagation();
                                                         e.preventDefault();
@@ -279,6 +284,7 @@ const Sidebar = () => {
                                                     }
                                                 }}
                                                 className="cursor-pointer text-sm hover:text-red-400 active:text-red-300 py-1 touch-manipulation"
+                                                style={{ touchAction: 'manipulation' }}
                                             >
                                                 Logout
                                             </p>

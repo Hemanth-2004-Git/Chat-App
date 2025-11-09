@@ -473,6 +473,23 @@ const ChatContainer = () => {
     }
   }, [replyingTo])
 
+  // Handle toggle info panel - consolidated function for both click and touch
+  const handleToggleInfo = () => {
+    try {
+      // Try direct function call first (more reliable for APK)
+      if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
+        window.toggleInfoPanel();
+      } else {
+        // Fallback to CustomEvent
+        const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
+        window.dispatchEvent(event);
+      }
+      setShowInfo(!showInfo);
+    } catch (error) {
+      console.error('Error toggling info panel:', error);
+    }
+  }
+
   if (!selectedUser) {
     return (
       <div className='flex flex-col items-center justify-center gap-2 text-gray-500 bg-white/10 max-md:hidden'>
@@ -544,41 +561,26 @@ const ChatContainer = () => {
             try {
               e.stopPropagation();
               e.preventDefault();
-              // Try direct function call first (more reliable for APK)
-              if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
-                window.toggleInfoPanel();
-              } else {
-                // Fallback to CustomEvent
-                const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
-                window.dispatchEvent(event);
-              }
-              setShowInfo(!showInfo)
+              handleToggleInfo();
             } catch (error) {
               console.error('Error toggling info panel:', error);
             }
           }}
-          onTouchStart={(e) => {
+          onTouchEnd={(e) => {
             try {
               e.stopPropagation();
               e.preventDefault();
-              // Try direct function call first (more reliable for APK)
-              if (typeof window !== 'undefined' && typeof window.toggleInfoPanel === 'function') {
-                window.toggleInfoPanel();
-              } else {
-                // Fallback to CustomEvent
-                const event = new CustomEvent('toggleInfo', { detail: { user: selectedUser } });
-                window.dispatchEvent(event);
-              }
-              setShowInfo(!showInfo)
+              handleToggleInfo();
             } catch (error) {
               console.error('Error toggling info panel:', error);
             }
           }}
           className='p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex-shrink-0 touch-manipulation'
+          style={{ touchAction: 'manipulation' }}
           aria-label="Info"
           type="button"
         >
-          <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6'/>
+          <img src={assets.help_icon} alt="Info" className='w-5 h-5 md:w-6 md:h-6 pointer-events-none'/>
         </button>
       </div>
 
