@@ -12,44 +12,28 @@ const isWebView = window.navigator.standalone ||
 
 export const CallContext = createContext();
 
-// Free STUN servers (Google's public STUN)
+// STUN server (for NAT discovery)
 const STUN_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' }
+  { urls: 'stun:stun.l.google.com:19302' }
 ];
 
-// Free TURN servers - using public free TURN servers
-// Note: These are public servers and may have rate limits
-// For production, use your own TURN server (Metered.ca, Twilio, or self-hosted)
+// TURN server (for relay when direct connection fails - essential for cross-network calls)
+// Using ExpressTurn free TURN server for reliable cross-network connectivity
 const TURN_SERVERS = [
-  // Public free TURN server (may have limitations)
   {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
+    urls: 'turn:relay1.expressturn.com:3478',
+    username: 'efree',
+    credential: 'efree'
   }
 ];
 
-// Use both STUN and TURN servers for better cross-device connectivity
+// WebRTC ICE configuration with STUN + TURN for full cross-network support
 const ICE_SERVERS = {
   iceServers: [
     ...STUN_SERVERS,
-    ...TURN_SERVERS // Enable TURN servers for NAT traversal
+    ...TURN_SERVERS
   ],
-  iceCandidatePoolSize: 10 // Pre-gather more candidates
+  iceCandidatePoolSize: 10 // Pre-gather more candidates for better connectivity
 };
 
 export const CallContextProvider = ({ children, socket }) => {
@@ -741,6 +725,23 @@ export const CallContextProvider = ({ children, socket }) => {
       return;
     }
 
+    // Verify HTTPS (required for WebRTC and getUserMedia)
+    const isSecureContext = window.isSecureContext || 
+                            location.protocol === 'https:' || 
+                            location.hostname === 'localhost' || 
+                            location.hostname === '127.0.0.1';
+    
+    if (!isSecureContext) {
+      toast.error('WebRTC requires HTTPS connection (or localhost)');
+      return;
+    }
+
+    // Check if getUserMedia is available
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast.error('Microphone access not supported in this browser');
+      return;
+    }
+
     try {
       setCallStatus('calling');
       callStatusRef.current = 'calling';
@@ -762,7 +763,9 @@ export const CallContextProvider = ({ children, socket }) => {
         video: false
       };
 
+      console.log('🎤 Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('✅ Microphone access granted, stream obtained:', stream);
       
       localStreamRef.current = stream;
       if (localVideoRef.current) {
@@ -812,18 +815,34 @@ export const CallContextProvider = ({ children, socket }) => {
       }
 
     } catch (error) {
-      console.error('Error initiating call:', error);
+      console.error('❌ Error initiating call:', error);
       
-      // Better error messages for mobile
+      // Better error messages for microphone permissions
       let errorMessage = 'Failed to start call. ';
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        errorMessage += 'Please allow microphone access in your browser/app settings.';
+        errorMessage = 'Microphone permission denied. Please allow microphone access in your browser/app settings.';
       } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        errorMessage += 'No microphone found. Please connect a microphone.';
+        errorMessage = 'No microphone found. Please connect a microphone.';
       } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-        errorMessage += 'Microphone is being used by another app.';
+        errorMessage = 'Microphone is being used by another app. Please close other apps using the microphone.';
+      } else if (error.name === 'OverconstrainedError') {
+        errorMessage = 'Microphone constraints not supported. Trying with default settings...';
+        // Try with simpler constraints
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          localStreamRef.current = fallbackStream;
+          console.log('✅ Fallback microphone access successful');
+          // Continue with call setup...
+          const pc = createPeerConnection();
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+          await pc.setLocalDescription(offer);
+          socket.emit('call-user', { to: userId, offer: offer });
+          return;
+        } catch (fallbackError) {
+          errorMessage = 'Failed to access microphone. Please check permissions.';
+        }
       } else {
-        errorMessage += 'Please check microphone permissions.';
+        errorMessage += 'Please check microphone permissions and try again.';
       }
       
       toast.error(errorMessage);
@@ -834,6 +853,25 @@ export const CallContextProvider = ({ children, socket }) => {
   // Accept incoming call
   const acceptCall = async () => {
     if (!incomingCall || !socket) return;
+
+    // Verify HTTPS (required for WebRTC and getUserMedia)
+    const isSecureContext = window.isSecureContext || 
+                            location.protocol === 'https:' || 
+                            location.hostname === 'localhost' || 
+                            location.hostname === '127.0.0.1';
+    
+    if (!isSecureContext) {
+      toast.error('WebRTC requires HTTPS connection (or localhost)');
+      setIncomingCall(null);
+      return;
+    }
+
+    // Check if getUserMedia is available
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast.error('Microphone access not supported in this browser');
+      setIncomingCall(null);
+      return;
+    }
 
     try {
       // Get user media with mobile-specific constraints
@@ -850,7 +888,9 @@ export const CallContextProvider = ({ children, socket }) => {
         video: false
       };
 
+      console.log('🎤 Requesting microphone access to accept call...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('✅ Microphone access granted, stream obtained:', stream);
       
       localStreamRef.current = stream;
       if (localVideoRef.current) {
