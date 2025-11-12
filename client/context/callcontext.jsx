@@ -60,6 +60,55 @@ export const CallContextProvider = ({ children, socket }) => {
   const callStatusRef = useRef('idle');
   const [callDuration, setCallDuration] = useState(0);
 
+  // Effect to ensure remote audio plays when stream is available
+  useEffect(() => {
+    if (activeCall && remoteVideoRef.current) {
+      const audio = remoteVideoRef.current;
+      
+      // Check if stream is available
+      const checkAndPlay = () => {
+        if (audio.srcObject) {
+          audio.muted = false;
+          
+          // Try to play audio
+          const tryPlay = () => {
+            if (audio.srcObject && audio.readyState >= 2) {
+              audio.play().then(() => {
+                console.log('✅ Remote audio playing via useEffect');
+              }).catch(err => {
+                console.log('Audio play attempt:', err);
+              });
+            }
+          };
+          
+          tryPlay();
+          
+          // Also try when audio can play
+          audio.addEventListener('canplay', tryPlay, { once: true });
+          audio.addEventListener('loadedmetadata', tryPlay, { once: true });
+          
+          return () => {
+            audio.removeEventListener('canplay', tryPlay);
+            audio.removeEventListener('loadedmetadata', tryPlay);
+          };
+        }
+      };
+      
+      // Check immediately
+      const cleanup = checkAndPlay();
+      
+      // Also check after a short delay (in case stream arrives later)
+      const timeoutId = setTimeout(() => {
+        checkAndPlay();
+      }, 1000);
+      
+      return () => {
+        if (cleanup) cleanup();
+        clearTimeout(timeoutId);
+      };
+    }
+  }, [activeCall]);
+
   // Initialize socket listeners
   useEffect(() => {
     if (!socket) return;
@@ -149,6 +198,18 @@ export const CallContextProvider = ({ children, socket }) => {
             clearTimeout(peerConnectionRef.current._callTimeout);
             peerConnectionRef.current._callTimeout = null;
           }
+          
+          // Ensure remote audio is ready to play when stream arrives
+          setTimeout(() => {
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.muted = false;
+              if (remoteVideoRef.current.srcObject) {
+                remoteVideoRef.current.play().catch(err => {
+                  console.log('Remote audio play attempt after answer:', err);
+                });
+              }
+            }
+          }, 500);
         } catch (error) {
           console.error('Error handling answer:', error);
         }
@@ -191,26 +252,56 @@ export const CallContextProvider = ({ children, socket }) => {
         remoteVideoRef.current.srcObject = remoteStream;
         remoteStreamRef.current = remoteStream;
         
-        // For mobile/WebView: ensure audio plays
-        if (isMobile || isWebView) {
-          setTimeout(() => {
-            if (remoteVideoRef.current) {
-              remoteVideoRef.current.play().catch(err => {
-                console.warn('Auto-play prevented, user interaction required:', err);
-                // Try to play on user interaction
-                const playAudio = () => {
-                  if (remoteVideoRef.current) {
-                    remoteVideoRef.current.play().catch(console.error);
-                  }
-                  document.removeEventListener('touchstart', playAudio);
-                  document.removeEventListener('click', playAudio);
-                };
-                document.addEventListener('touchstart', playAudio, { once: true });
-                document.addEventListener('click', playAudio, { once: true });
-              });
-            }
-          }, 100);
-        }
+        // Ensure remote audio is NOT muted and volume is set
+        remoteVideoRef.current.muted = false;
+        remoteVideoRef.current.volume = 1.0;
+        
+        // Set attributes for proper playback
+        remoteVideoRef.current.setAttribute('playsinline', 'true');
+        remoteVideoRef.current.setAttribute('webkit-playsinline', 'true');
+        remoteVideoRef.current.setAttribute('autoplay', 'true');
+        
+        // Force play audio - works for both desktop and mobile
+        const playRemoteAudio = () => {
+          if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+            // Ensure not muted and volume is max
+            remoteVideoRef.current.muted = false;
+            remoteVideoRef.current.volume = 1.0;
+            
+            remoteVideoRef.current.play().then(() => {
+              console.log('✅ Remote audio playing');
+            }).catch(err => {
+              console.warn('⚠️ Auto-play prevented, will retry:', err);
+              // Retry on user interaction
+              const retryPlay = () => {
+                if (remoteVideoRef.current) {
+                  remoteVideoRef.current.muted = false;
+                  remoteVideoRef.current.volume = 1.0;
+                  remoteVideoRef.current.play().catch(console.error);
+                }
+                document.removeEventListener('touchstart', retryPlay);
+                document.removeEventListener('click', retryPlay);
+                document.removeEventListener('touchend', retryPlay);
+              };
+              document.addEventListener('touchstart', retryPlay, { once: true });
+              document.addEventListener('click', retryPlay, { once: true });
+              document.addEventListener('touchend', retryPlay, { once: true });
+            });
+          }
+        };
+        
+        // Try to play immediately
+        setTimeout(playRemoteAudio, 100);
+        
+        // Also try when metadata is loaded
+        remoteVideoRef.current.onloadedmetadata = () => {
+          playRemoteAudio();
+        };
+        
+        // Also try on play event
+        remoteVideoRef.current.onplay = () => {
+          console.log('🎵 Remote audio onplay event fired');
+        };
       }
     };
 
@@ -411,6 +502,18 @@ export const CallContextProvider = ({ children, socket }) => {
       });
       setIncomingCall(null);
       startCallTimer();
+
+      // Ensure remote audio element is ready and not muted
+      setTimeout(() => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.muted = false;
+          if (remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.play().catch(err => {
+              console.log('Remote audio play attempt:', err);
+            });
+          }
+        }
+      }, 500);
 
       toast.success('Call connected');
     } catch (error) {

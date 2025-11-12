@@ -47,13 +47,28 @@ const ActiveCallModal = () => {
           playsInline 
           className="hidden"
           style={{ display: 'none' }}
+          muted={false}
+          volume={1.0}
           onLoadedMetadata={() => {
-            // Force play on mobile/WebView
-            if (remoteVideoRef.current) {
+            // Force play when metadata is loaded
+            if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+              remoteVideoRef.current.volume = 1.0;
+              remoteVideoRef.current.muted = false;
               remoteVideoRef.current.play().catch(err => {
-                console.log('Auto-play prevented, will play on user interaction');
+                console.log('Auto-play prevented, will play on user interaction:', err);
               });
             }
+          }}
+          onCanPlay={() => {
+            // Also try to play when audio can play
+            if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+              remoteVideoRef.current.volume = 1.0;
+              remoteVideoRef.current.muted = false;
+              remoteVideoRef.current.play().catch(console.error);
+            }
+          }}
+          onPlay={() => {
+            console.log('🎵 Remote audio started playing');
           }}
         />
         <audio 
