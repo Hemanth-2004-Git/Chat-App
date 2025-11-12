@@ -479,89 +479,80 @@ export const CallContextProvider = ({ children, socket }) => {
               console.log('✅ Audio track unmuted');
             };
             
-            // Monitor track readyState changes (less aggressive logging)
+            // Monitor track readyState changes (only recover if connection is actually failing)
             const checkTrackState = setInterval(() => {
               if (track.readyState === 'ended') {
-                console.warn('⚠️ Track readyState changed to ended');
-                
-                // Check if this is a temporary state change (WebRTC might be switching tracks)
-                setTimeout(() => {
-                  // Check again after a delay
-                  if (track.readyState === 'ended') {
-                    // Also check if there are other live tracks
+                // Check connection state before attempting recovery
+                if (peerConnectionRef.current) {
+                  const pcState = peerConnectionRef.current.connectionState;
+                  const iceState = peerConnectionRef.current.iceConnectionState;
+                  
+                  // Only recover if connection is actually failed/disconnected
+                  if (pcState === 'failed' || pcState === 'disconnected' || 
+                      iceState === 'failed' || iceState === 'disconnected') {
+                    // Check if there are other live tracks
                     const stream = remoteStreamRef.current;
                     if (stream) {
                       const liveTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
                       if (liveTracks.length === 0) {
-                        console.warn('⚠️ All tracks ended, attempting recovery...');
+                        console.warn('⚠️ All tracks ended and connection failed, attempting recovery...');
                         clearInterval(checkTrackState);
                         recoverTrack(track);
-                      } else {
-                        console.log('ℹ️ Track ended but other tracks are live, no recovery needed');
                       }
                     } else {
                       clearInterval(checkTrackState);
                       recoverTrack(track);
                     }
-                  } else {
-                    console.log('✅ Track recovered automatically');
+                  } else if (pcState === 'new' || pcState === 'connecting' || iceState === 'checking') {
+                    // Connection is still being established, don't recover
+                    return;
                   }
-                }, 2000);
-              } else if (track.readyState === 'live') {
-                // Log occasionally (not every 2 seconds)
-                if (Math.random() < 0.1) { // 10% chance to log
-                  console.log('✅ Remote audio active: track is live');
                 }
               }
-            }, 3000); // Check every 3 seconds instead of 2
+            }, 5000); // Check every 5 seconds to reduce noise
             
             // Store interval for cleanup
             track._monitorInterval = checkTrackState;
           }
         });
         
-        // Monitor stream active state (less aggressive - only log, don't immediately recover)
+        // Monitor stream active state (less aggressive - only recover if connection is actually failing)
         const checkStreamActive = setInterval(() => {
           if (!remoteStream.active) {
-            console.warn('⚠️ Remote stream became inactive!');
-            
             // Check if there are any live tracks despite stream being inactive
             const liveTracks = remoteStream.getTracks().filter(t => t.readyState === 'live');
             if (liveTracks.length > 0) {
-              console.log('ℹ️ Stream inactive but tracks are live, stream may recover...');
-              // Don't clear interval - keep monitoring
+              // Tracks are live, stream might just be in a temporary state
               return;
             }
             
             // Check connection state before attempting recovery
             if (peerConnectionRef.current) {
               const pcState = peerConnectionRef.current.connectionState;
-              if (pcState === 'connected' || pcState === 'connecting') {
-                console.log('ℹ️ Connection still active, waiting for stream recovery...');
-                // Wait a bit before attempting recovery
+              const iceState = peerConnectionRef.current.iceConnectionState;
+              
+              // Only recover if connection is actually failed/disconnected, not during normal setup
+              if (pcState === 'failed' || pcState === 'disconnected' || 
+                  iceState === 'failed' || iceState === 'disconnected') {
+                console.warn('⚠️ Remote stream inactive and connection failed, attempting recovery...');
+                clearInterval(checkStreamActive);
+                recoverStream();
+              } else if (pcState === 'new' || pcState === 'connecting' || iceState === 'checking') {
+                // Connection is still being established, don't recover yet
+                return;
+              } else if (pcState === 'connected' && iceState === 'connected') {
+                // Connection is good but stream is inactive - wait longer
                 setTimeout(() => {
-                  if (!remoteStream.active && liveTracks.length === 0) {
-                    console.warn('⚠️ Stream still inactive after waiting, attempting recovery...');
+                  if (!remoteStream.active && remoteStream.getTracks().filter(t => t.readyState === 'live').length === 0) {
+                    console.warn('⚠️ Stream still inactive after waiting, connection may be lost');
                     clearInterval(checkStreamActive);
                     recoverStream();
                   }
-                }, 3000);
-              } else {
-                console.warn('⚠️ Connection state:', pcState, '- attempting recovery...');
-                clearInterval(checkStreamActive);
-                recoverStream();
+                }, 5000);
               }
-            } else {
-              clearInterval(checkStreamActive);
-              recoverStream();
-            }
-          } else {
-            // Stream is active - log occasionally (not every 2 seconds)
-            if (Math.random() < 0.1) { // 10% chance to log
-              console.log('✅ Remote stream active');
             }
           }
-        }, 3000); // Check every 3 seconds instead of 2
+        }, 5000); // Check every 5 seconds to reduce noise
         
         remoteStream._activeCheck = checkStreamActive;
         
@@ -1096,7 +1087,8 @@ export const CallContextProvider = ({ children, socket }) => {
       } else if (pc.connectionState === 'closed') {
         console.log('🔌 Connection state: closed');
       } else if (pc.connectionState === 'new') {
-        console.log('🆕 Connection state: new');
+        // "new" state is normal during initial setup, don't log or recover
+        // This happens when peer connection is first created
       }
     };
 
@@ -1209,43 +1201,54 @@ export const CallContextProvider = ({ children, socket }) => {
           console.warn('Failed to play recovered stream:', err);
         });
       }
-    } else {
-      // Check connection state before attempting reconnection
-      const pc = peerConnectionRef.current;
-      if (pc.connectionState === 'connected' || pc.connectionState === 'connecting') {
-        console.log('ℹ️ Connection still active, waiting for new tracks...');
-        // Wait a bit more - new tracks might arrive
-        setTimeout(() => {
-          const stream = remoteStreamRef.current;
-          if (stream) {
-            const newTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
-            if (newTracks.length > 0) {
-              console.log('✅ New tracks arrived, reattaching...');
-              if (remoteVideoRef.current) {
-                const newStream = new MediaStream(newTracks);
-                remoteStreamRef.current = newStream;
-                remoteVideoRef.current.srcObject = newStream;
-                remoteVideoRef.current.muted = false;
-                remoteVideoRef.current.volume = 1.0;
-                remoteVideoRef.current.play().catch(console.warn);
-              }
-            } else {
-              console.warn('⚠️ No active tracks found after waiting, connection may be lost');
-              // Only attempt reconnection if connection is actually failing
-              if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-                attemptReconnection();
+      } else {
+        // Check connection state before attempting reconnection
+        const pc = peerConnectionRef.current;
+        const pcState = pc.connectionState;
+        const iceState = pc.iceConnectionState;
+        
+        // Don't recover if connection is still being established
+        if (pcState === 'new' || pcState === 'connecting' || iceState === 'checking' || iceState === 'new') {
+          console.log('ℹ️ Connection still being established, waiting for tracks...');
+          return;
+        }
+        
+        if (pcState === 'connected' || pcState === 'connecting') {
+          console.log('ℹ️ Connection still active, waiting for new tracks...');
+          // Wait a bit more - new tracks might arrive
+          setTimeout(() => {
+            const stream = remoteStreamRef.current;
+            if (stream) {
+              const newTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
+              if (newTracks.length > 0) {
+                console.log('✅ New tracks arrived, reattaching...');
+                if (remoteVideoRef.current) {
+                  const newStream = new MediaStream(newTracks);
+                  remoteStreamRef.current = newStream;
+                  remoteVideoRef.current.srcObject = newStream;
+                  remoteVideoRef.current.muted = false;
+                  remoteVideoRef.current.volume = 1.0;
+                  remoteVideoRef.current.play().catch(console.warn);
+                }
+              } else {
+                // Only attempt reconnection if connection is actually failing
+                if (pcState === 'disconnected' || pcState === 'failed' || 
+                    iceState === 'disconnected' || iceState === 'failed') {
+                  console.warn('⚠️ No active tracks found and connection failed, attempting recovery...');
+                  attemptReconnection();
+                }
               }
             }
+          }, 3000);
+        } else {
+          // Only reconnect if connection is actually failed/disconnected
+          if (pcState === 'disconnected' || pcState === 'failed' || 
+              iceState === 'disconnected' || iceState === 'failed') {
+            console.warn('⚠️ No active tracks found, connection state:', pcState, 'ICE state:', iceState);
+            attemptReconnection();
           }
-        }, 2000);
-      } else {
-        console.warn('⚠️ No active tracks found, connection state:', pc.connectionState);
-        // Only reconnect if connection is actually failed/disconnected
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-          attemptReconnection();
         }
       }
-    }
   };
 
   // Recover stream when it becomes inactive

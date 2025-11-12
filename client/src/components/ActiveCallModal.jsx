@@ -26,24 +26,29 @@ const ActiveCallModal = () => {
           
           // If we have a stored stream but audio element doesn't have it, attach it
           // This handles the case where stream arrives before modal renders
+          let logCount = 0;
           const interval = setInterval(() => {
             if (audio.srcObject) {
               const tracks = audio.srcObject.getTracks();
               const audioTrack = tracks.find(t => t.kind === 'audio');
-              console.log('🔊 Audio element state:', {
-                paused: audio.paused,
-                muted: audio.muted,
-                volume: audio.volume,
-                readyState: audio.readyState,
-                srcObject: !!audio.srcObject,
-                tracks: tracks.length,
-                audioTrack: audioTrack ? {
-                  enabled: audioTrack.enabled,
-                  readyState: audioTrack.readyState,
-                  muted: audioTrack.muted,
-                  id: audioTrack.id
-                } : null
-              });
+              
+              // Only log occasionally (every 10th check = every 20 seconds) to reduce noise
+              logCount++;
+              if (logCount % 10 === 0) {
+                console.log('🔊 Audio element state:', {
+                  paused: audio.paused,
+                  muted: audio.muted,
+                  volume: audio.volume,
+                  readyState: audio.readyState,
+                  srcObject: !!audio.srcObject,
+                  tracks: tracks.length,
+                  audioTrack: audioTrack ? {
+                    enabled: audioTrack.enabled,
+                    readyState: audioTrack.readyState,
+                    muted: audioTrack.muted
+                  } : null
+                });
+              }
               
               // If audio is paused but should be playing, try to play
               if (audio.paused && audio.srcObject) {
@@ -61,17 +66,8 @@ const ActiveCallModal = () => {
                   audio.play().catch(err => {
                     console.warn('Failed to resume audio:', err);
                   });
-                } else {
-                  console.warn('⚠️ Cannot resume: track state:', {
-                    hasTrack: !!audioTrack,
-                    trackReadyState: audioTrack?.readyState,
-                    streamActive: stream.active
-                  });
                 }
               }
-            } else {
-              // Try to get stream from context if available
-              console.log('⏳ Audio element has no stream yet');
             }
           }, 2000);
           
