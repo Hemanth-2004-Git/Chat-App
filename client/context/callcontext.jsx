@@ -16,32 +16,40 @@ export const CallContext = createContext();
 const STUN_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' }
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' }
 ];
 
-// Free TURN server (Metered.ca - 100GB/month free)
-// You can also use your own TURN server or other free services
+// Free TURN servers - using public free TURN servers
+// Note: These are public servers and may have rate limits
+// For production, use your own TURN server (Metered.ca, Twilio, or self-hosted)
 const TURN_SERVERS = [
+  // Public free TURN server (may have limitations)
   {
-    urls: 'turn:a.relay.metered.ca:80',
-    username: 'a1b2c3d4e5f6g7h8i9j0', // Replace with your Metered.ca credentials
-    credential: 'a1b2c3d4e5f6g7h8i9j0' // Replace with your Metered.ca credentials
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
   },
   {
-    urls: 'turn:a.relay.metered.ca:443',
-    username: 'a1b2c3d4e5f6g7h8i9j0',
-    credential: 'a1b2c3d4e5f6g7h8i9j0'
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
   }
 ];
 
-// For now, use only STUN (works for most cases)
-// Add TURN servers if you have credentials
+// Use both STUN and TURN servers for better cross-device connectivity
 const ICE_SERVERS = {
   iceServers: [
     ...STUN_SERVERS,
-    // Uncomment and add your TURN credentials if needed:
-    // ...TURN_SERVERS
-  ]
+    ...TURN_SERVERS // Enable TURN servers for NAT traversal
+  ],
+  iceCandidatePoolSize: 10 // Pre-gather more candidates
 };
 
 export const CallContextProvider = ({ children, socket }) => {
@@ -185,13 +193,26 @@ export const CallContextProvider = ({ children, socket }) => {
     };
 
     const handleICE = async (data) => {
-      console.log('🧊 Received ICE candidate:', data);
+      console.log('🧊 Received ICE candidate from:', data.from);
       if (peerConnectionRef.current && data.candidate) {
         try {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          // Check if peer connection is in valid state
+          if (peerConnectionRef.current.signalingState === 'closed') {
+            console.warn('⚠️ Cannot add ICE candidate: peer connection is closed');
+            return;
+          }
+          
+          const candidate = new RTCIceCandidate(data.candidate);
+          await peerConnectionRef.current.addIceCandidate(candidate);
+          console.log('✅ ICE candidate added successfully');
         } catch (error) {
-          console.error('Error adding ICE candidate:', error);
+          // Don't log error if candidate was already added (common and harmless)
+          if (error.message && !error.message.includes('already been added')) {
+            console.error('Error adding ICE candidate:', error);
+          }
         }
+      } else {
+        console.warn('⚠️ Received ICE candidate but peer connection or candidate missing');
       }
     };
 
@@ -557,33 +578,92 @@ export const CallContextProvider = ({ children, socket }) => {
       if (event.candidate && socket) {
         const targetUserId = activeCall?.userId || incomingCall?.from;
         if (targetUserId) {
-          console.log('🧊 Sending ICE candidate to:', targetUserId);
+          console.log('🧊 Sending ICE candidate:', {
+            to: targetUserId,
+            candidate: event.candidate.candidate,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            sdpMid: event.candidate.sdpMid
+          });
           socket.emit('ice-candidate', {
             to: targetUserId,
             candidate: event.candidate
           });
+        } else {
+          console.warn('⚠️ No target user ID for ICE candidate');
         }
       } else if (!event.candidate) {
-        console.log('🧊 ICE gathering complete');
+        console.log('🧊 ICE gathering complete - no more candidates');
       }
     };
     
     // Log connection state changes
     pc.oniceconnectionstatechange = () => {
       console.log('🔌 ICE connection state:', pc.iceConnectionState);
+      
+      // If connection fails, try to restart ICE
+      if (pc.iceConnectionState === 'failed') {
+        console.warn('⚠️ ICE connection failed, attempting ICE restart...');
+        pc.restartIce().catch(err => {
+          console.error('Failed to restart ICE:', err);
+        });
+      }
+      
+      // Log connection quality
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        console.log('✅ ICE connection established successfully!');
+        
+        // Get connection stats
+        pc.getStats().then(stats => {
+          stats.forEach(report => {
+            if (report.type === 'candidate-pair' && report.selected) {
+              console.log('📊 Connection stats:', {
+                localCandidate: report.localCandidateId,
+                remoteCandidate: report.remoteCandidateId,
+                state: report.state,
+                priority: report.priority
+              });
+            }
+          });
+        }).catch(err => {
+          console.warn('Failed to get stats:', err);
+        });
+      }
     };
     
     pc.onicegatheringstatechange = () => {
       console.log('🧊 ICE gathering state:', pc.iceGatheringState);
+      
+      if (pc.iceGatheringState === 'complete') {
+        console.log('✅ ICE gathering complete - all candidates collected');
+      }
     };
 
     // Handle connection state changes
     pc.onconnectionstatechange = () => {
       console.log('🔌 Connection state:', pc.connectionState);
       console.log('🔌 Signaling state:', pc.signalingState);
+      console.log('🔌 ICE connection state:', pc.iceConnectionState);
       
       if (pc.connectionState === 'connected') {
         console.log('✅ Peer connection established!');
+        
+        // Log connection details for debugging
+        pc.getStats().then(stats => {
+          let hasRelay = false;
+          let hasHost = false;
+          stats.forEach(report => {
+            if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+              if (report.candidateType === 'relay') hasRelay = true;
+              if (report.candidateType === 'host') hasHost = true;
+            }
+          });
+          console.log('📊 Connection type:', {
+            usingRelay: hasRelay,
+            usingHost: hasHost,
+            note: hasRelay ? 'Using TURN (relay) - good for cross-device' : 'Using direct connection'
+          });
+        });
+        
         // When connected, ensure remote audio plays
         setTimeout(() => {
           if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
@@ -594,9 +674,32 @@ export const CallContextProvider = ({ children, socket }) => {
             });
           }
         }, 500);
-      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        endCall();
-        toast.error('Call disconnected');
+      } else if (pc.connectionState === 'connecting') {
+        console.log('🔄 Connecting...');
+      } else if (pc.connectionState === 'failed') {
+        console.error('❌ Connection failed! This may be a NAT/firewall issue.');
+        console.error('💡 Try: 1) Check firewall settings 2) Use TURN server 3) Check network');
+        
+        // Try ICE restart before giving up
+        setTimeout(() => {
+          if (peerConnectionRef.current && peerConnectionRef.current.connectionState === 'failed') {
+            console.log('🔄 Attempting ICE restart...');
+            peerConnectionRef.current.restartIce().catch(err => {
+              console.error('ICE restart failed:', err);
+              endCall();
+              toast.error('Call failed - Check network connection');
+            });
+          }
+        }, 2000);
+      } else if (pc.connectionState === 'disconnected') {
+        console.warn('⚠️ Connection disconnected');
+        // Don't end call immediately - might reconnect
+        setTimeout(() => {
+          if (peerConnectionRef.current && peerConnectionRef.current.connectionState === 'disconnected') {
+            endCall();
+            toast.error('Call disconnected');
+          }
+        }, 5000);
       }
     };
 
@@ -675,9 +778,19 @@ export const CallContextProvider = ({ children, socket }) => {
       // Create peer connection
       const pc = createPeerConnection();
 
-      // Create offer
-      const offer = await pc.createOffer();
+      // Create offer with better configuration for cross-device
+      const offerOptions = {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false,
+        iceRestart: false
+      };
+      
+      const offer = await pc.createOffer(offerOptions);
       await pc.setLocalDescription(offer);
+      
+      console.log('📤 Created offer, local description set');
+      console.log('📤 Offer SDP type:', offer.type);
+      console.log('📤 ICE candidates in offer:', offer.sdp?.match(/a=candidate:/g)?.length || 0);
 
       // Send call request
       socket.emit('call-user', {
@@ -756,10 +869,20 @@ export const CallContextProvider = ({ children, socket }) => {
       // Set remote description from offer
       if (incomingCall.offer) {
         await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+        console.log('📥 Set remote description (offer)');
         
-        // Create answer
-        const answer = await pc.createAnswer();
+        // Create answer with better configuration
+        const answerOptions = {
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: false
+        };
+        
+        const answer = await pc.createAnswer(answerOptions);
         await pc.setLocalDescription(answer);
+        
+        console.log('📤 Created answer, local description set');
+        console.log('📤 Answer SDP type:', answer.type);
+        console.log('📤 ICE candidates in answer:', answer.sdp?.match(/a=candidate:/g)?.length || 0);
 
         // Send answer
         socket.emit('call-answer', {
