@@ -58,6 +58,8 @@ export const CallContextProvider = ({ children, socket }) => {
   const remoteVideoRef = useRef(null);
   const callTimerRef = useRef(null);
   const callStatusRef = useRef('idle');
+  const audioContextRef = useRef(null);
+  const audioSourceRef = useRef(null);
   const [callDuration, setCallDuration] = useState(0);
 
   // Effect to ensure remote audio plays when stream is available
@@ -335,37 +337,84 @@ export const CallContextProvider = ({ children, socket }) => {
           });
           
           // Force play audio - works for both desktop and mobile
+          // Try Web Audio API first (more reliable), fallback to HTML audio
           const playRemoteAudio = () => {
-            if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-              const audio = remoteVideoRef.current;
-              const stream = audio.srcObject;
-              const audioTracks = stream.getAudioTracks();
-              
-              // Check track state
-              if (audioTracks.length === 0) {
-                console.warn('⚠️ No audio tracks in stream!');
-                return;
+            if (!remoteVideoRef.current || !remoteVideoRef.current.srcObject) {
+              console.warn('⚠️ Cannot play: audio element or stream missing');
+              return;
+            }
+            
+            const audio = remoteVideoRef.current;
+            const stream = audio.srcObject;
+            const audioTracks = stream.getAudioTracks();
+            
+            // Check track state
+            if (audioTracks.length === 0) {
+              console.warn('⚠️ No audio tracks in stream!');
+              return;
+            }
+            
+            const audioTrack = audioTracks[0];
+            console.log('🎵 Audio track state:', {
+              enabled: audioTrack.enabled,
+              muted: audioTrack.muted,
+              readyState: audioTrack.readyState,
+              id: audioTrack.id
+            });
+            
+            // Ensure track is enabled
+            if (!audioTrack.enabled) {
+              console.log('🔧 Enabling audio track...');
+              audioTrack.enabled = true;
+            }
+            
+            // Try Web Audio API approach (more reliable for MediaStreams)
+            try {
+              // Create or reuse AudioContext
+              if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+                audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
               }
               
-              const audioTrack = audioTracks[0];
-              console.log('🎵 Audio track state:', {
-                enabled: audioTrack.enabled,
-                muted: audioTrack.muted,
-                readyState: audioTrack.readyState,
-                id: audioTrack.id
+              const audioContext = audioContextRef.current;
+              
+              // Resume audio context if suspended (required by some browsers)
+              if (audioContext.state === 'suspended') {
+                audioContext.resume().then(() => {
+                  console.log('✅ AudioContext resumed');
+                });
+              }
+              
+              // Create media stream source
+              if (audioSourceRef.current) {
+                audioSourceRef.current.disconnect();
+              }
+              
+              audioSourceRef.current = audioContext.createMediaStreamSource(stream);
+              const gainNode = audioContext.createGain();
+              gainNode.gain.value = 1.0; // Full volume
+              
+              audioSourceRef.current.connect(gainNode);
+              gainNode.connect(audioContext.destination);
+              
+              console.log('✅ Using Web Audio API for playback');
+              
+              // Also set up HTML audio element as backup
+              audio.muted = false;
+              audio.volume = 1.0;
+              audio.play().then(() => {
+                console.log('✅ HTML audio also playing (backup)');
+              }).catch(err => {
+                console.log('HTML audio play failed (using Web Audio API):', err);
               });
               
-              // Ensure track is enabled
-              if (!audioTrack.enabled) {
-                console.log('🔧 Enabling audio track...');
-                audioTrack.enabled = true;
-              }
+            } catch (webAudioError) {
+              console.warn('⚠️ Web Audio API failed, using HTML audio:', webAudioError);
               
-              // Ensure not muted and volume is max
+              // Fallback to HTML audio element
               audio.muted = false;
               audio.volume = 1.0;
               
-              console.log('▶️ Attempting to play remote audio...');
+              console.log('▶️ Attempting to play remote audio via HTML element...');
               audio.play().then(() => {
                 console.log('✅ Remote audio playing successfully!');
                 console.log('🔊 Audio state:', {
@@ -379,7 +428,7 @@ export const CallContextProvider = ({ children, socket }) => {
                 
                 // Monitor if audio pauses unexpectedly
                 const checkPlaying = setInterval(() => {
-                  if (audio.paused && stream.active) {
+                  if (audio.paused && stream.active && audioTrack.readyState === 'live') {
                     console.warn('⚠️ Audio paused unexpectedly, attempting to resume...');
                     audio.play().catch(err => {
                       console.warn('Failed to resume:', err);
@@ -410,8 +459,6 @@ export const CallContextProvider = ({ children, socket }) => {
                 document.addEventListener('click', retryPlay, { once: true });
                 document.addEventListener('touchend', retryPlay, { once: true });
               });
-            } else {
-              console.warn('⚠️ Cannot play: audio element or stream missing');
             }
           };
           
@@ -807,6 +854,24 @@ export const CallContextProvider = ({ children, socket }) => {
     // Clear stream active checks
     if (remoteStreamRef.current && remoteStreamRef.current._activeCheck) {
       clearInterval(remoteStreamRef.current._activeCheck);
+    }
+    
+    // Disconnect Web Audio API
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.disconnect();
+        audioSourceRef.current = null;
+      } catch (err) {
+        console.warn('Error disconnecting audio source:', err);
+      }
+    }
+    
+    // Close AudioContext
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(err => {
+        console.warn('Error closing AudioContext:', err);
+      });
+      audioContextRef.current = null;
     }
     
     // Stop local stream
