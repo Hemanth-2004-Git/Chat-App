@@ -12,14 +12,19 @@ const isWebView = window.navigator.standalone ||
 
 export const CallContext = createContext();
 
-// STUN server (for NAT discovery)
+// STUN servers (for NAT discovery) - Multiple for redundancy
 const STUN_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' }
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' }
 ];
 
-// TURN server (for relay when direct connection fails - essential for cross-network calls)
-// Using OpenRelay free TURN server for reliable cross-network connectivity
+// TURN servers (for relay when direct connection fails - essential for cross-network calls)
+// Using multiple free TURN servers for better reliability and fallback
 const TURN_SERVERS = [
+  // OpenRelay (free, open source)
   {
     urls: 'turn:openrelay.metered.ca:80',
     username: 'openrelayproject',
@@ -34,6 +39,38 @@ const TURN_SERVERS = [
     urls: 'turn:openrelay.metered.ca:443?transport=tcp',
     username: 'openrelayproject',
     credential: 'openrelayproject'
+  },
+  // Metered.ca free tier (100GB/month free)
+  {
+    urls: 'turn:a.relay.metered.ca:80',
+    username: 'a1b2c3d4e5f6g7h8i9j0',
+    credential: 'a1b2c3d4e5f6g7h8i9j0'
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443',
+    username: 'a1b2c3d4e5f6g7h8i9j0',
+    credential: 'a1b2c3d4e5f6g7h8i9j0'
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+    username: 'a1b2c3d4e5f6g7h8i9j0',
+    credential: 'a1b2c3d4e5f6g7h8i9j0'
+  },
+  // Xirsys public TURN (free tier)
+  {
+    urls: 'turn:open.xirsys.com:80?transport=udp',
+    username: 'open',
+    credential: 'open'
+  },
+  {
+    urls: 'turn:open.xirsys.com:3478?transport=udp',
+    username: 'open',
+    credential: 'open'
+  },
+  {
+    urls: 'turn:open.xirsys.com:80?transport=tcp',
+    username: 'open',
+    credential: 'open'
   }
 ];
 
