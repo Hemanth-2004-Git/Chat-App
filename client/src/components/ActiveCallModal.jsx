@@ -15,6 +15,30 @@ const ActiveCallModal = () => {
     remoteVideoRef
   } = useCall();
 
+  // Debug: Log audio element state
+  React.useEffect(() => {
+    if (activeCall && remoteVideoRef.current) {
+      const audio = remoteVideoRef.current;
+      const interval = setInterval(() => {
+        if (audio.srcObject) {
+          const tracks = audio.srcObject.getTracks();
+          console.log('🔊 Audio element state:', {
+            paused: audio.paused,
+            muted: audio.muted,
+            volume: audio.volume,
+            readyState: audio.readyState,
+            srcObject: !!audio.srcObject,
+            tracks: tracks.length,
+            trackEnabled: tracks.length > 0 ? tracks[0].enabled : false,
+            trackReadyState: tracks.length > 0 ? tracks[0].readyState : 'none'
+          });
+        }
+      }, 2000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [activeCall, remoteVideoRef]);
+
   if (!activeCall) return null;
 
   return (
@@ -117,14 +141,31 @@ const ActiveCallModal = () => {
             </svg>
           </button>
 
-          {/* Speaker Button (placeholder for future enhancement) */}
+          {/* Manual Audio Play Button - Fallback if auto-play fails */}
           <button
-            className="w-14 h-14 rounded-full bg-gray-700 hover:bg-gray-600 flex items-center justify-center transition-all hover:scale-110 active:scale-95 opacity-50 cursor-not-allowed"
-            title="Speaker (Coming soon)"
-            disabled
+            onClick={() => {
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.muted = false;
+                remoteVideoRef.current.volume = 1.0;
+                if (remoteVideoRef.current.srcObject) {
+                  remoteVideoRef.current.play().then(() => {
+                    console.log('✅ Manual audio play successful');
+                    toast.success('Audio playing');
+                  }).catch(err => {
+                    console.error('Manual audio play failed:', err);
+                    toast.error('Failed to play audio. Check console for details.');
+                  });
+                } else {
+                  toast.error('No audio stream available');
+                }
+              }
+            }}
+            className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+            title="Play Audio (if not hearing)"
           >
             <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </button>
         </div>

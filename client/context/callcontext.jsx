@@ -240,85 +240,170 @@ export const CallContextProvider = ({ children, socket }) => {
     // Add local stream tracks
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
+        console.log('🎤 Adding local track:', track.kind, track.id);
         pc.addTrack(track, localStreamRef.current);
       });
     }
 
     // Handle remote stream
     pc.ontrack = (event) => {
-      console.log('📹 Received remote stream');
-      if (remoteVideoRef.current) {
+      console.log('📹 Received remote stream event:', event);
+      console.log('📹 Streams:', event.streams);
+      console.log('📹 Track:', event.track);
+      
+      if (event.streams && event.streams.length > 0) {
         const remoteStream = event.streams[0];
-        remoteVideoRef.current.srcObject = remoteStream;
-        remoteStreamRef.current = remoteStream;
+        console.log('📹 Remote stream tracks:', remoteStream.getTracks());
         
-        // Ensure remote audio is NOT muted and volume is set
-        remoteVideoRef.current.muted = false;
-        remoteVideoRef.current.volume = 1.0;
-        
-        // Set attributes for proper playback
-        remoteVideoRef.current.setAttribute('playsinline', 'true');
-        remoteVideoRef.current.setAttribute('webkit-playsinline', 'true');
-        remoteVideoRef.current.setAttribute('autoplay', 'true');
-        
-        // Force play audio - works for both desktop and mobile
-        const playRemoteAudio = () => {
-          if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-            // Ensure not muted and volume is max
-            remoteVideoRef.current.muted = false;
-            remoteVideoRef.current.volume = 1.0;
-            
-            remoteVideoRef.current.play().then(() => {
-              console.log('✅ Remote audio playing');
-            }).catch(err => {
-              console.warn('⚠️ Auto-play prevented, will retry:', err);
-              // Retry on user interaction
-              const retryPlay = () => {
-                if (remoteVideoRef.current) {
-                  remoteVideoRef.current.muted = false;
-                  remoteVideoRef.current.volume = 1.0;
-                  remoteVideoRef.current.play().catch(console.error);
-                }
-                document.removeEventListener('touchstart', retryPlay);
-                document.removeEventListener('click', retryPlay);
-                document.removeEventListener('touchend', retryPlay);
-              };
-              document.addEventListener('touchstart', retryPlay, { once: true });
-              document.addEventListener('click', retryPlay, { once: true });
-              document.addEventListener('touchend', retryPlay, { once: true });
-            });
+        if (remoteVideoRef.current) {
+          // Stop any existing stream
+          if (remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
           }
-        };
-        
-        // Try to play immediately
-        setTimeout(playRemoteAudio, 100);
-        
-        // Also try when metadata is loaded
-        remoteVideoRef.current.onloadedmetadata = () => {
-          playRemoteAudio();
-        };
-        
-        // Also try on play event
-        remoteVideoRef.current.onplay = () => {
-          console.log('🎵 Remote audio onplay event fired');
-        };
+          
+          remoteVideoRef.current.srcObject = remoteStream;
+          remoteStreamRef.current = remoteStream;
+          
+          // Ensure remote audio is NOT muted and volume is set
+          remoteVideoRef.current.muted = false;
+          remoteVideoRef.current.volume = 1.0;
+          
+          // Set attributes for proper playback
+          remoteVideoRef.current.setAttribute('playsinline', 'true');
+          remoteVideoRef.current.setAttribute('webkit-playsinline', 'true');
+          remoteVideoRef.current.setAttribute('autoplay', 'true');
+          
+          console.log('🔊 Audio element configured:', {
+            muted: remoteVideoRef.current.muted,
+            volume: remoteVideoRef.current.volume,
+            srcObject: !!remoteVideoRef.current.srcObject,
+            readyState: remoteVideoRef.current.readyState
+          });
+          
+          // Force play audio - works for both desktop and mobile
+          const playRemoteAudio = () => {
+            if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+              // Ensure not muted and volume is max
+              remoteVideoRef.current.muted = false;
+              remoteVideoRef.current.volume = 1.0;
+              
+              console.log('▶️ Attempting to play remote audio...');
+              remoteVideoRef.current.play().then(() => {
+                console.log('✅ Remote audio playing successfully!');
+                console.log('🔊 Audio state:', {
+                  paused: remoteVideoRef.current.paused,
+                  muted: remoteVideoRef.current.muted,
+                  volume: remoteVideoRef.current.volume,
+                  readyState: remoteVideoRef.current.readyState
+                });
+              }).catch(err => {
+                console.warn('⚠️ Auto-play prevented, will retry:', err);
+                // Retry on user interaction
+                const retryPlay = () => {
+                  if (remoteVideoRef.current) {
+                    remoteVideoRef.current.muted = false;
+                    remoteVideoRef.current.volume = 1.0;
+                    console.log('🔄 Retrying audio play on user interaction...');
+                    remoteVideoRef.current.play().then(() => {
+                      console.log('✅ Remote audio playing after user interaction!');
+                    }).catch(console.error);
+                  }
+                  document.removeEventListener('touchstart', retryPlay);
+                  document.removeEventListener('click', retryPlay);
+                  document.removeEventListener('touchend', retryPlay);
+                };
+                document.addEventListener('touchstart', retryPlay, { once: true });
+                document.addEventListener('click', retryPlay, { once: true });
+                document.addEventListener('touchend', retryPlay, { once: true });
+              });
+            } else {
+              console.warn('⚠️ Cannot play: audio element or stream missing');
+            }
+          };
+          
+          // Try to play immediately
+          setTimeout(playRemoteAudio, 100);
+          
+          // Also try when metadata is loaded
+          remoteVideoRef.current.onloadedmetadata = () => {
+            console.log('📋 Metadata loaded, attempting play...');
+            playRemoteAudio();
+          };
+          
+          // Also try on canplay event
+          remoteVideoRef.current.oncanplay = () => {
+            console.log('▶️ Can play, attempting play...');
+            playRemoteAudio();
+          };
+          
+          // Also try on play event
+          remoteVideoRef.current.onplay = () => {
+            console.log('🎵 Remote audio onplay event fired');
+          };
+          
+          // Log when audio starts/stops
+          remoteVideoRef.current.onplaying = () => {
+            console.log('🎵 Remote audio is now playing!');
+          };
+          
+          remoteVideoRef.current.onpause = () => {
+            console.warn('⏸️ Remote audio paused');
+          };
+          
+          remoteVideoRef.current.onerror = (e) => {
+            console.error('❌ Remote audio error:', e);
+          };
+        } else {
+          console.error('❌ remoteVideoRef.current is null!');
+        }
+      } else {
+        console.warn('⚠️ No streams in event');
       }
     };
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
-      if (event.candidate && socket && activeCall) {
-        socket.emit('ice-candidate', {
-          to: activeCall.userId,
-          candidate: event.candidate
-        });
+      if (event.candidate && socket) {
+        const targetUserId = activeCall?.userId || incomingCall?.from;
+        if (targetUserId) {
+          console.log('🧊 Sending ICE candidate to:', targetUserId);
+          socket.emit('ice-candidate', {
+            to: targetUserId,
+            candidate: event.candidate
+          });
+        }
+      } else if (!event.candidate) {
+        console.log('🧊 ICE gathering complete');
       }
+    };
+    
+    // Log connection state changes
+    pc.oniceconnectionstatechange = () => {
+      console.log('🔌 ICE connection state:', pc.iceConnectionState);
+    };
+    
+    pc.onicegatheringstatechange = () => {
+      console.log('🧊 ICE gathering state:', pc.iceGatheringState);
     };
 
     // Handle connection state changes
     pc.onconnectionstatechange = () => {
       console.log('🔌 Connection state:', pc.connectionState);
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      console.log('🔌 Signaling state:', pc.signalingState);
+      
+      if (pc.connectionState === 'connected') {
+        console.log('✅ Peer connection established!');
+        // When connected, ensure remote audio plays
+        setTimeout(() => {
+          if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.muted = false;
+            remoteVideoRef.current.volume = 1.0;
+            remoteVideoRef.current.play().catch(err => {
+              console.log('Audio play on connection:', err);
+            });
+          }
+        }, 500);
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         endCall();
         toast.error('Call disconnected');
       }
@@ -504,16 +589,36 @@ export const CallContextProvider = ({ children, socket }) => {
       startCallTimer();
 
       // Ensure remote audio element is ready and not muted
-      setTimeout(() => {
+      // Check multiple times as stream might arrive later
+      const checkAndPlayAudio = () => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.muted = false;
+          remoteVideoRef.current.volume = 1.0;
+          
           if (remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.play().catch(err => {
-              console.log('Remote audio play attempt:', err);
+            const tracks = remoteVideoRef.current.srcObject.getTracks();
+            console.log('🔊 Checking audio after accept:', {
+              hasStream: !!remoteVideoRef.current.srcObject,
+              tracks: tracks.length,
+              trackEnabled: tracks.length > 0 ? tracks[0].enabled : false
             });
+            
+            remoteVideoRef.current.play().then(() => {
+              console.log('✅ Remote audio playing after accept');
+            }).catch(err => {
+              console.log('Remote audio play attempt after accept:', err);
+            });
+          } else {
+            console.log('⏳ Waiting for remote stream...');
           }
         }
-      }, 500);
+      };
+      
+      // Check immediately and then retry
+      checkAndPlayAudio();
+      setTimeout(checkAndPlayAudio, 500);
+      setTimeout(checkAndPlayAudio, 1000);
+      setTimeout(checkAndPlayAudio, 2000);
 
       toast.success('Call connected');
     } catch (error) {
