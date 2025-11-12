@@ -516,43 +516,48 @@ export const CallContextProvider = ({ children, socket }) => {
           }
         });
         
-        // Monitor stream active state (less aggressive - only recover if connection is actually failing)
+        // Monitor stream active state (WebView/APK compatible - less aggressive)
+        // Note: In WebView, stream.active might be false even when tracks are live
         const checkStreamActive = setInterval(() => {
-          if (!remoteStream.active) {
-            // Check if there are any live tracks despite stream being inactive
-            const liveTracks = remoteStream.getTracks().filter(t => t.readyState === 'live');
-            if (liveTracks.length > 0) {
-              // Tracks are live, stream might just be in a temporary state
-              return;
-            }
-            
-            // Check connection state before attempting recovery
+          // First check if tracks are actually live (more reliable than stream.active in WebView)
+          const liveTracks = remoteStream.getTracks().filter(t => t.readyState === 'live');
+          const hasLiveTracks = liveTracks.length > 0;
+          
+          // In WebView/APK, stream.active can be false even when working
+          // So we prioritize track state over stream.active
+          if (!remoteStream.active && !hasLiveTracks) {
+            // Both stream and tracks are inactive - check connection state
             if (peerConnectionRef.current) {
               const pcState = peerConnectionRef.current.connectionState;
               const iceState = peerConnectionRef.current.iceConnectionState;
               
-              // Only recover if connection is actually failed/disconnected, not during normal setup
+              // Only recover if connection is actually failed/disconnected
               if (pcState === 'failed' || pcState === 'disconnected' || 
                   iceState === 'failed' || iceState === 'disconnected') {
-                console.warn('⚠️ Remote stream inactive and connection failed, attempting recovery...');
+                console.warn('⚠️ Remote stream and tracks inactive, connection failed - attempting recovery...');
                 clearInterval(checkStreamActive);
                 recoverStream();
               } else if (pcState === 'new' || pcState === 'connecting' || iceState === 'checking') {
-                // Connection is still being established, don't recover yet
+                // Connection is still being established, don't recover
                 return;
               } else if (pcState === 'connected' && iceState === 'connected') {
-                // Connection is good but stream is inactive - wait longer
+                // Connection is good but stream/tracks inactive - wait longer before recovering
                 setTimeout(() => {
-                  if (!remoteStream.active && remoteStream.getTracks().filter(t => t.readyState === 'live').length === 0) {
-                    console.warn('⚠️ Stream still inactive after waiting, connection may be lost');
+                  const stillInactive = !remoteStream.active && 
+                    remoteStream.getTracks().filter(t => t.readyState === 'live').length === 0;
+                  if (stillInactive) {
+                    console.warn('⚠️ Stream still inactive after waiting, attempting recovery...');
                     clearInterval(checkStreamActive);
                     recoverStream();
                   }
-                }, 5000);
+                }, 10000); // Wait 10 seconds for WebView/APK
               }
             }
+          } else if (!remoteStream.active && hasLiveTracks) {
+            // Stream inactive but tracks are live - this is normal in WebView/APK
+            // Don't log or recover, just silently continue
           }
-        }, 5000); // Check every 5 seconds to reduce noise
+        }, 10000); // Check every 10 seconds for WebView/APK compatibility
         
         remoteStream._activeCheck = checkStreamActive;
         
@@ -573,14 +578,24 @@ export const CallContextProvider = ({ children, socket }) => {
             }
             
             // Create a new MediaStream with the tracks to ensure it stays alive
+            // Important for WebView/APK: Create new stream to prevent premature ending
             const newStream = new MediaStream();
             tracks.forEach(track => {
               if (track.readyState !== 'ended') {
                 newStream.addTrack(track);
+                // Ensure track stays enabled
+                track.enabled = true;
               }
             });
             
+            // Store the new stream reference
+            remoteStreamRef.current = newStream;
             remoteVideoRef.current.srcObject = newStream;
+            
+            // For WebView/APK: Keep reference to original stream tracks to prevent garbage collection
+            if (!remoteStream._originalTracks) {
+              remoteStream._originalTracks = tracks;
+            }
           
           // Ensure remote audio is NOT muted and volume is set
           remoteVideoRef.current.muted = false;
@@ -621,13 +636,31 @@ export const CallContextProvider = ({ children, socket }) => {
               enabled: audioTrack.enabled,
               muted: audioTrack.muted,
               readyState: audioTrack.readyState,
-              id: audioTrack.id
+              id: audioTrack.id,
+              streamActive: stream.active
             });
             
-            // Ensure track is enabled
+            // Ensure track is enabled (critical for WebView/APK)
             if (!audioTrack.enabled) {
               console.log('🔧 Enabling audio track...');
               audioTrack.enabled = true;
+            }
+            
+            // For WebView/APK: Ensure stream doesn't get garbage collected
+            // Keep a reference to prevent premature stream ending
+            if (isWebView || isMobile) {
+              // Store stream reference globally to prevent GC
+              if (!window._activeWebRTCStreams) {
+                window._activeWebRTCStreams = new Set();
+              }
+              window._activeWebRTCStreams.add(stream);
+              
+              // Also store tracks to prevent them from being collected
+              audioTracks.forEach(track => {
+                if (!track._webViewKeepAlive) {
+                  track._webViewKeepAlive = true;
+                }
+              });
             }
             
             // Try Web Audio API approach (more reliable for MediaStreams)
@@ -1753,8 +1786,19 @@ export const CallContextProvider = ({ children, socket }) => {
 
     // Stop remote stream
     if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach(track => track.stop());
+      remoteStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+        // Clean up WebView keep-alive flag
+        if (track._webViewKeepAlive) {
+          delete track._webViewKeepAlive;
+        }
+      });
       remoteStreamRef.current = null;
+    }
+    
+    // Clean up WebView stream references
+    if (window._activeWebRTCStreams) {
+      window._activeWebRTCStreams.clear();
     }
 
     // Close peer connection
