@@ -16,29 +16,46 @@ const ActiveCallModal = () => {
     remoteVideoRef
   } = useCall();
 
-  // Debug: Log audio element state
+  // Debug: Log audio element state and ensure stream is attached
   React.useEffect(() => {
-    if (activeCall && remoteVideoRef.current) {
-      const audio = remoteVideoRef.current;
-      const interval = setInterval(() => {
-        if (audio.srcObject) {
-          const tracks = audio.srcObject.getTracks();
-          console.log('🔊 Audio element state:', {
-            paused: audio.paused,
-            muted: audio.muted,
-            volume: audio.volume,
-            readyState: audio.readyState,
-            srcObject: !!audio.srcObject,
-            tracks: tracks.length,
-            trackEnabled: tracks.length > 0 ? tracks[0].enabled : false,
-            trackReadyState: tracks.length > 0 ? tracks[0].readyState : 'none'
-          });
+    if (activeCall) {
+      // Wait a bit for the ref to be ready
+      const checkRef = () => {
+        if (remoteVideoRef.current) {
+          const audio = remoteVideoRef.current;
+          
+          // If we have a stored stream but audio element doesn't have it, attach it
+          // This handles the case where stream arrives before modal renders
+          const interval = setInterval(() => {
+            if (audio.srcObject) {
+              const tracks = audio.srcObject.getTracks();
+              console.log('🔊 Audio element state:', {
+                paused: audio.paused,
+                muted: audio.muted,
+                volume: audio.volume,
+                readyState: audio.readyState,
+                srcObject: !!audio.srcObject,
+                tracks: tracks.length,
+                trackEnabled: tracks.length > 0 ? tracks[0].enabled : false,
+                trackReadyState: tracks.length > 0 ? tracks[0].readyState : 'none'
+              });
+            } else {
+              // Try to get stream from context if available
+              console.log('⏳ Audio element has no stream yet');
+            }
+          }, 2000);
+          
+          return () => clearInterval(interval);
+        } else {
+          console.warn('⚠️ remoteVideoRef not ready yet');
         }
-      }, 2000);
+      };
       
-      return () => clearInterval(interval);
+      // Check immediately and retry if needed
+      const timeout = setTimeout(checkRef, 100);
+      return () => clearTimeout(timeout);
     }
-  }, [activeCall, remoteVideoRef]);
+  }, [activeCall]);
 
   if (!activeCall) return null;
 

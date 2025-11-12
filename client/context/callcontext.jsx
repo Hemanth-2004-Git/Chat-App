@@ -62,49 +62,64 @@ export const CallContextProvider = ({ children, socket }) => {
 
   // Effect to ensure remote audio plays when stream is available
   useEffect(() => {
-    if (activeCall && remoteVideoRef.current) {
-      const audio = remoteVideoRef.current;
-      
-      // Check if stream is available
-      const checkAndPlay = () => {
-        if (audio.srcObject) {
-          audio.muted = false;
+    if (activeCall) {
+      // Function to check and attach stream if ref becomes available
+      const checkAndAttachStream = () => {
+        if (remoteVideoRef.current && remoteStreamRef.current) {
+          const audio = remoteVideoRef.current;
           
-          // Try to play audio
-          const tryPlay = () => {
-            if (audio.srcObject && audio.readyState >= 2) {
-              audio.play().then(() => {
-                console.log('✅ Remote audio playing via useEffect');
-              }).catch(err => {
-                console.log('Audio play attempt:', err);
-              });
-            }
-          };
+          // If audio doesn't have the stream, attach it
+          if (!audio.srcObject || audio.srcObject !== remoteStreamRef.current) {
+            console.log('🔗 Attaching stored stream to audio element');
+            audio.srcObject = remoteStreamRef.current;
+            audio.muted = false;
+            audio.volume = 1.0;
+          }
           
-          tryPlay();
-          
-          // Also try when audio can play
-          audio.addEventListener('canplay', tryPlay, { once: true });
-          audio.addEventListener('loadedmetadata', tryPlay, { once: true });
-          
-          return () => {
-            audio.removeEventListener('canplay', tryPlay);
-            audio.removeEventListener('loadedmetadata', tryPlay);
-          };
+          // Check if stream is available and try to play
+          if (audio.srcObject) {
+            audio.muted = false;
+            audio.volume = 1.0;
+            
+            // Try to play audio
+            const tryPlay = () => {
+              if (audio.srcObject && audio.readyState >= 2) {
+                audio.play().then(() => {
+                  console.log('✅ Remote audio playing via useEffect');
+                }).catch(err => {
+                  console.log('Audio play attempt:', err);
+                });
+              }
+            };
+            
+            tryPlay();
+            
+            // Also try when audio can play
+            audio.addEventListener('canplay', tryPlay, { once: true });
+            audio.addEventListener('loadedmetadata', tryPlay, { once: true });
+            
+            return () => {
+              audio.removeEventListener('canplay', tryPlay);
+              audio.removeEventListener('loadedmetadata', tryPlay);
+            };
+          }
         }
       };
       
       // Check immediately
-      const cleanup = checkAndPlay();
+      let cleanup = checkAndAttachStream();
       
-      // Also check after a short delay (in case stream arrives later)
-      const timeoutId = setTimeout(() => {
-        checkAndPlay();
-      }, 1000);
+      // Also check after delays (in case ref becomes available later)
+      const timeouts = [
+        setTimeout(() => { cleanup = checkAndAttachStream(); }, 100),
+        setTimeout(() => { cleanup = checkAndAttachStream(); }, 500),
+        setTimeout(() => { cleanup = checkAndAttachStream(); }, 1000),
+        setTimeout(() => { cleanup = checkAndAttachStream(); }, 2000)
+      ];
       
       return () => {
         if (cleanup) cleanup();
-        clearTimeout(timeoutId);
+        timeouts.forEach(clearTimeout);
       };
     }
   }, [activeCall]);
@@ -153,7 +168,7 @@ export const CallContextProvider = ({ children, socket }) => {
       setCallStatus('idle');
       callStatusRef.current = 'idle';
       stopCallTimer();
-      toast.info('Call ended');
+      toast('Call ended', { icon: '📴' });
     };
 
     const handleCallAnswer = (data) => {
@@ -255,14 +270,18 @@ export const CallContextProvider = ({ children, socket }) => {
         const remoteStream = event.streams[0];
         console.log('📹 Remote stream tracks:', remoteStream.getTracks());
         
-        if (remoteVideoRef.current) {
-          // Stop any existing stream
-          if (remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
-          }
-          
-          remoteVideoRef.current.srcObject = remoteStream;
-          remoteStreamRef.current = remoteStream;
+        // Store stream in ref for later use
+        remoteStreamRef.current = remoteStream;
+        
+        // Function to attach stream to audio element
+        const attachStreamToAudio = () => {
+          if (remoteVideoRef.current) {
+            // Stop any existing stream
+            if (remoteVideoRef.current.srcObject) {
+              remoteVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
+            }
+            
+            remoteVideoRef.current.srcObject = remoteStream;
           
           // Ensure remote audio is NOT muted and volume is set
           remoteVideoRef.current.muted = false;
@@ -353,9 +372,30 @@ export const CallContextProvider = ({ children, socket }) => {
           remoteVideoRef.current.onerror = (e) => {
             console.error('❌ Remote audio error:', e);
           };
+          
+          return true; // Successfully attached
         } else {
-          console.error('❌ remoteVideoRef.current is null!');
+          console.warn('⚠️ remoteVideoRef.current is null, will retry...');
+          return false; // Not ready yet
         }
+      };
+      
+      // Try to attach immediately
+      if (!attachStreamToAudio()) {
+        // If ref is not ready, retry after a short delay
+        // This can happen if the modal hasn't rendered yet
+        let retryCount = 0;
+        const maxRetries = 10;
+        const retryInterval = setInterval(() => {
+          retryCount++;
+          if (attachStreamToAudio() || retryCount >= maxRetries) {
+            clearInterval(retryInterval);
+            if (retryCount >= maxRetries) {
+              console.error('❌ Failed to attach stream after', maxRetries, 'retries');
+            }
+          }
+        }, 200);
+      }
       } else {
         console.warn('⚠️ No streams in event');
       }
