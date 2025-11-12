@@ -479,37 +479,44 @@ export const CallContextProvider = ({ children, socket }) => {
               console.log('✅ Audio track unmuted');
             };
             
-            // Monitor track readyState changes (only recover if connection is actually failing)
+            // Monitor track readyState changes and auto-recover
             const checkTrackState = setInterval(() => {
               if (track.readyState === 'ended') {
-                // Check connection state before attempting recovery
-                if (peerConnectionRef.current) {
-                  const pcState = peerConnectionRef.current.connectionState;
-                  const iceState = peerConnectionRef.current.iceConnectionState;
-                  
-                  // Only recover if connection is actually failed/disconnected
-                  if (pcState === 'failed' || pcState === 'disconnected' || 
-                      iceState === 'failed' || iceState === 'disconnected') {
-                    // Check if there are other live tracks
-                    const stream = remoteStreamRef.current;
-                    if (stream) {
-                      const liveTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
-                      if (liveTracks.length === 0) {
-                        console.warn('⚠️ All tracks ended and connection failed, attempting recovery...');
-                        clearInterval(checkTrackState);
-                        recoverTrack(track);
-                      }
-                    } else {
-                      clearInterval(checkTrackState);
-                      recoverTrack(track);
+                console.warn('⚠️ Track readyState changed to ended:', track.id);
+                
+                // Always attempt recovery when track ends (don't wait for connection to fail)
+                // This ensures audio continues even if one track ends
+                const stream = remoteStreamRef.current;
+                if (stream) {
+                  const liveTracks = stream.getAudioTracks().filter(t => t.readyState === 'live' && t.id !== track.id);
+                  if (liveTracks.length === 0) {
+                    // No other live tracks - attempt recovery
+                    console.warn('⚠️ All tracks ended, attempting recovery...');
+                    clearInterval(checkTrackState);
+                    recoverTrack(track);
+                  } else {
+                    // Other tracks are live - just reattach those
+                    console.log('ℹ️ Track ended but other tracks are live, reattaching...');
+                    if (remoteVideoRef.current) {
+                      const newStream = new MediaStream(liveTracks);
+                      remoteStreamRef.current = newStream;
+                      remoteVideoRef.current.srcObject = newStream;
+                      remoteVideoRef.current.muted = false;
+                      remoteVideoRef.current.volume = 1.0;
+                      remoteVideoRef.current.play().catch(console.warn);
                     }
-                  } else if (pcState === 'new' || pcState === 'connecting' || iceState === 'checking') {
-                    // Connection is still being established, don't recover
-                    return;
                   }
+                } else {
+                  clearInterval(checkTrackState);
+                  recoverTrack(track);
+                }
+              } else if (track.readyState === 'live') {
+                // Track is live - log occasionally
+                if (Math.random() < 0.05) { // 5% chance
+                  console.log('✅ Remote audio active: track is live');
                 }
               }
-            }, 5000); // Check every 5 seconds to reduce noise
+            }, 3000); // Check every 3 seconds
             
             // Store interval for cleanup
             track._monitorInterval = checkTrackState;
@@ -894,24 +901,17 @@ export const CallContextProvider = ({ children, socket }) => {
     pc.oniceconnectionstatechange = () => {
       console.log('🔌 ICE connection state:', pc.iceConnectionState);
       
-      // If connection fails, try to restart ICE
+      // If connection fails, try to restart ICE automatically
       if (pc.iceConnectionState === 'failed') {
-        console.warn('⚠️ ICE connection failed, attempting ICE restart...');
-        try {
-          // Check if restartIce is available and returns a Promise
-          if (pc.restartIce && typeof pc.restartIce === 'function') {
-            const restartPromise = pc.restartIce();
-            if (restartPromise && typeof restartPromise.catch === 'function') {
-              restartPromise.catch(err => {
-                console.error('Failed to restart ICE:', err);
-              });
-            }
-          } else {
-            console.warn('⚠️ restartIce() not available in this browser');
+        console.warn('⚠️ ICE connection failed, attempting automatic ICE restart...');
+        console.log('🔄 Auto-recovery: ICE connection state failed');
+        
+        // Use attemptReconnection which handles ICE restart properly
+        setTimeout(() => {
+          if (pc.iceConnectionState === 'failed' && activeCall) {
+            attemptReconnection();
           }
-        } catch (err) {
-          console.error('Error calling restartIce:', err);
-        }
+        }, 1000);
       }
       
       // Log connection quality
@@ -1129,7 +1129,7 @@ export const CallContextProvider = ({ children, socket }) => {
     return pc;
   };
 
-  // Attempt reconnection when connection fails or disconnects
+  // Attempt reconnection when connection fails or disconnects (with force renegotiation)
   const attemptReconnection = async () => {
     if (!peerConnectionRef.current || !socket || !activeCall) {
       return;
@@ -1144,21 +1144,22 @@ export const CallContextProvider = ({ children, socket }) => {
 
     reconnectAttemptsRef.current++;
     console.log(`🔄 Reconnection attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts}`);
+    console.log('🔧 Connection state:', peerConnectionRef.current.connectionState);
+    console.log('🔧 ICE connection state:', peerConnectionRef.current.iceConnectionState);
 
     try {
       const pc = peerConnectionRef.current;
       
-      // Check if we can restart ICE
-      if (pc.restartIce && typeof pc.restartIce === 'function') {
-        const restartPromise = pc.restartIce();
-        if (restartPromise && typeof restartPromise.catch === 'function') {
-          await restartPromise;
-          console.log('✅ ICE restart initiated');
-        }
-      } else {
-        // Manual ICE restart by creating a new offer
-        console.log('🔄 Creating re-offer for ICE restart...');
-        const offer = await pc.createOffer({ iceRestart: true });
+      // Always use manual ICE restart with createOffer for better compatibility
+      console.log('🔄 Creating re-offer for ICE restart...');
+      
+      // Ensure we're in a stable state before creating offer
+      if (pc.signalingState === 'stable' || pc.signalingState === 'have-local-offer' || pc.signalingState === 'have-remote-offer') {
+        const offer = await pc.createOffer({ 
+          iceRestart: true,
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: false
+        });
         await pc.setLocalDescription(offer);
         
         const targetUserId = activeCall.userId;
@@ -1168,7 +1169,16 @@ export const CallContextProvider = ({ children, socket }) => {
             sdp: offer
           });
           console.log('📤 Sent re-offer for ICE restart');
+          toast('Reconnecting...', { icon: '🔄' });
         }
+      } else {
+        console.warn('⚠️ Signaling state not ready for ICE restart:', pc.signalingState);
+        // Wait and retry
+        setTimeout(() => {
+          if (peerConnectionRef.current && peerConnectionRef.current.connectionState !== 'connected') {
+            attemptReconnection();
+          }
+        }, 2000);
       }
     } catch (error) {
       console.error('❌ Reconnection attempt failed:', error);
@@ -1181,9 +1191,9 @@ export const CallContextProvider = ({ children, socket }) => {
     }
   };
 
-  // Recover track when it ends
+  // Recover track when it ends (with automatic renegotiation)
   const recoverTrack = async (endedTrack) => {
-    console.log('🔧 Attempting track recovery...');
+    console.log('🔧 Attempting track recovery for ended track:', endedTrack.id);
     
     if (!peerConnectionRef.current || !remoteStreamRef.current) {
       console.warn('⚠️ Cannot recover: peer connection or stream missing');
@@ -1191,14 +1201,9 @@ export const CallContextProvider = ({ children, socket }) => {
     }
 
     // Wait a bit for new tracks to potentially arrive (WebRTC might be switching tracks)
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Check if there are other active tracks
-    const stream = remoteStreamRef.current;
-    const audioTracks = stream.getAudioTracks();
-    const activeTracks = audioTracks.filter(t => t.readyState === 'live' && t.id !== endedTrack.id);
-    
-    // Also check if peer connection has new tracks
+    // Check if peer connection has new tracks from receivers (most reliable)
     if (peerConnectionRef.current.getReceivers) {
       const receivers = peerConnectionRef.current.getReceivers();
       const receiverTracks = receivers
@@ -1213,7 +1218,21 @@ export const CallContextProvider = ({ children, socket }) => {
           remoteVideoRef.current.srcObject = newStream;
           remoteVideoRef.current.muted = false;
           remoteVideoRef.current.volume = 1.0;
-          remoteVideoRef.current.play().catch(err => {
+          
+          // Ensure tracks stay enabled
+          receiverTracks.forEach(track => {
+            track.enabled = true;
+            // Monitor new tracks
+            track.onended = () => {
+              console.warn('⚠️ Recovered track ended, attempting recovery again...');
+              recoverTrack(track);
+            };
+          });
+          
+          remoteVideoRef.current.play().then(() => {
+            console.log('✅ Recovered stream playing successfully');
+            toast.success('Audio reconnected');
+          }).catch(err => {
             console.warn('Failed to play recovered stream:', err);
           });
           return;
@@ -1221,20 +1240,36 @@ export const CallContextProvider = ({ children, socket }) => {
       }
     }
     
+    // Check if there are other active tracks in current stream
+    const stream = remoteStreamRef.current;
+    const audioTracks = stream.getAudioTracks();
+    const activeTracks = audioTracks.filter(t => t.readyState === 'live' && t.id !== endedTrack.id);
+    
     if (activeTracks.length > 0) {
-      console.log('✅ Found active tracks, reattaching...');
-      // Reattach active tracks to audio element
+      console.log('✅ Found active tracks in stream, reattaching...');
       if (remoteVideoRef.current) {
         const newStream = new MediaStream(activeTracks);
         remoteStreamRef.current = newStream;
         remoteVideoRef.current.srcObject = newStream;
         remoteVideoRef.current.muted = false;
         remoteVideoRef.current.volume = 1.0;
-        remoteVideoRef.current.play().catch(err => {
+        
+        // Monitor tracks
+        activeTracks.forEach(track => {
+          track.enabled = true;
+          track.onended = () => {
+            console.warn('⚠️ Track ended, attempting recovery...');
+            recoverTrack(track);
+          };
+        });
+        
+        remoteVideoRef.current.play().then(() => {
+          console.log('✅ Recovered stream playing');
+        }).catch(err => {
           console.warn('Failed to play recovered stream:', err);
         });
       }
-      } else {
+    } else {
         // Check connection state before attempting reconnection
         const pc = peerConnectionRef.current;
         const pcState = pc.connectionState;
@@ -1284,7 +1319,7 @@ export const CallContextProvider = ({ children, socket }) => {
       }
   };
 
-  // Recover stream when it becomes inactive
+  // Recover stream when it becomes inactive (with force renegotiation)
   const recoverStream = async () => {
     console.log('🔧 Attempting stream recovery...');
     
@@ -1293,11 +1328,43 @@ export const CallContextProvider = ({ children, socket }) => {
       return;
     }
 
-    // Try to reconnect
+    const pc = peerConnectionRef.current;
+    
+    // First, check if we can get tracks from receivers
+    if (pc.getReceivers) {
+      const receivers = pc.getReceivers();
+      const receiverTracks = receivers
+        .map(r => r.track)
+        .filter(t => t && t.kind === 'audio' && t.readyState === 'live');
+      
+      if (receiverTracks.length > 0) {
+        console.log('✅ Found live tracks in receivers, reattaching stream...');
+        if (remoteVideoRef.current) {
+          const newStream = new MediaStream(receiverTracks);
+          remoteStreamRef.current = newStream;
+          remoteVideoRef.current.srcObject = newStream;
+          remoteVideoRef.current.muted = false;
+          remoteVideoRef.current.volume = 1.0;
+          
+          receiverTracks.forEach(track => {
+            track.enabled = true;
+          });
+          
+          remoteVideoRef.current.play().then(() => {
+            console.log('✅ Stream recovered and playing');
+            toast.success('Audio stream reconnected');
+          }).catch(console.warn);
+          return;
+        }
+      }
+    }
+    
+    // If no tracks found, try to reconnect
+    console.log('🔄 No live tracks found, attempting ICE restart...');
     attemptReconnection();
   };
 
-  // Re-capture local audio if track ends
+  // Re-capture local audio if track ends (with sender.replaceTrack for better compatibility)
   const reCaptureLocalAudio = async () => {
     console.log('🔄 Re-capturing local audio...');
     
@@ -1316,27 +1383,42 @@ export const CallContextProvider = ({ children, socket }) => {
       };
 
       const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newAudioTrack = newStream.getAudioTracks()[0];
       
-      // Replace old tracks with new ones in peer connection
+      if (!newAudioTrack) {
+        throw new Error('No audio track in new stream');
+      }
+      
+      // Replace tracks using sender.replaceTrack (better than removeTrack + addTrack)
       if (peerConnectionRef.current && localStreamRef.current) {
-        // Remove old tracks
+        const senders = peerConnectionRef.current.getSenders();
+        const audioSenders = senders.filter(sender => 
+          sender.track && sender.track.kind === 'audio'
+        );
+        
+        if (audioSenders.length > 0) {
+          // Replace existing audio track
+          console.log('🔄 Replacing audio track using sender.replaceTrack...');
+          await audioSenders[0].replaceTrack(newAudioTrack);
+          console.log('✅ Audio track replaced successfully');
+        } else {
+          // No sender found, add new track
+          console.log('🔄 No audio sender found, adding new track...');
+          peerConnectionRef.current.addTrack(newAudioTrack, newStream);
+        }
+        
+        // Stop old tracks
         localStreamRef.current.getTracks().forEach(track => {
-          peerConnectionRef.current.getSenders().forEach(sender => {
-            if (sender.track === track) {
-              peerConnectionRef.current.removeTrack(sender);
-            }
-          });
-          track.stop();
+          if (track !== newAudioTrack) {
+            track.stop();
+          }
         });
         
-        // Add new tracks
-        newStream.getAudioTracks().forEach(track => {
-          peerConnectionRef.current.addTrack(track, newStream);
-          track.onended = () => {
-            console.warn('⚠️ Local audio track ended again, attempting to re-capture...');
-            reCaptureLocalAudio();
-          };
-        });
+        // Monitor new track
+        newAudioTrack.onended = () => {
+          console.warn('⚠️ Local audio track ended again, attempting to re-capture...');
+          reCaptureLocalAudio();
+        };
         
         // Update local stream ref
         localStreamRef.current = newStream;
@@ -1344,8 +1426,9 @@ export const CallContextProvider = ({ children, socket }) => {
           localVideoRef.current.srcObject = newStream;
         }
         
-        // Trigger renegotiation
+        // Trigger renegotiation if connection is stable
         if (peerConnectionRef.current.signalingState === 'stable') {
+          console.log('🔄 Triggering renegotiation for track replacement...');
           const offer = await peerConnectionRef.current.createOffer();
           await peerConnectionRef.current.setLocalDescription(offer);
           
@@ -1359,11 +1442,20 @@ export const CallContextProvider = ({ children, socket }) => {
           }
         }
         
-        console.log('✅ Local audio re-captured and added to peer connection');
+        console.log('✅ Local audio re-captured and track replaced');
+        toast.success('Microphone reconnected');
       }
     } catch (error) {
       console.error('❌ Failed to re-capture local audio:', error);
       toast.error('Failed to re-capture microphone');
+      
+      // Retry after a delay
+      setTimeout(() => {
+        if (activeCall && peerConnectionRef.current) {
+          console.log('🔄 Retrying local audio re-capture...');
+          reCaptureLocalAudio();
+        }
+      }, 3000);
     }
   };
 
