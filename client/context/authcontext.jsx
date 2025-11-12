@@ -131,6 +131,14 @@ export const AuthContextProvider = ({ children }) => {
                 userId: userData.uid || userData._id,
               },
               transports: ["websocket"],
+              // Suppress socket.io debug logging to prevent en.info errors
+              debug: false,
+              logger: {
+                error: console.error.bind(console),
+                warn: console.warn.bind(console),
+                info: () => {}, // Suppress info logs to prevent en.info errors
+                debug: () => {},
+              }
             });
 
             newSocket.on("connect", () => {

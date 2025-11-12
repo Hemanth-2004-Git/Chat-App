@@ -29,6 +29,7 @@ const ActiveCallModal = () => {
           const interval = setInterval(() => {
             if (audio.srcObject) {
               const tracks = audio.srcObject.getTracks();
+              const audioTrack = tracks.find(t => t.kind === 'audio');
               console.log('🔊 Audio element state:', {
                 paused: audio.paused,
                 muted: audio.muted,
@@ -36,9 +37,21 @@ const ActiveCallModal = () => {
                 readyState: audio.readyState,
                 srcObject: !!audio.srcObject,
                 tracks: tracks.length,
-                trackEnabled: tracks.length > 0 ? tracks[0].enabled : false,
-                trackReadyState: tracks.length > 0 ? tracks[0].readyState : 'none'
+                audioTrack: audioTrack ? {
+                  enabled: audioTrack.enabled,
+                  readyState: audioTrack.readyState,
+                  muted: audioTrack.muted,
+                  id: audioTrack.id
+                } : null
               });
+              
+              // If audio is paused but should be playing, try to play
+              if (audio.paused && audio.srcObject && audio.readyState >= 2) {
+                console.log('🔄 Audio is paused, attempting to resume...');
+                audio.play().catch(err => {
+                  console.warn('Failed to resume audio:', err);
+                });
+              }
             } else {
               // Try to get stream from context if available
               console.log('⏳ Audio element has no stream yet');
