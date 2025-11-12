@@ -976,22 +976,53 @@ export const CallContextProvider = ({ children, socket }) => {
 
       toast.success('Call connected');
     } catch (error) {
-      console.error('Error accepting call:', error);
+      console.error('❌ Error accepting call:', error);
       
-      // Better error messages for mobile
+      // Better error messages for microphone permissions
       let errorMessage = 'Failed to accept call. ';
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        errorMessage += 'Please allow microphone access in your browser/app settings.';
+        errorMessage = 'Microphone permission denied. Please allow microphone access in your browser/app settings.';
       } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        errorMessage += 'No microphone found. Please connect a microphone.';
+        errorMessage = 'No microphone found. Please connect a microphone.';
       } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-        errorMessage += 'Microphone is being used by another app.';
+        errorMessage = 'Microphone is being used by another app. Please close other apps using the microphone.';
+      } else if (error.name === 'OverconstrainedError') {
+        errorMessage = 'Microphone constraints not supported. Trying with default settings...';
+        // Try with simpler constraints
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          localStreamRef.current = fallbackStream;
+          console.log('✅ Fallback microphone access successful');
+          // Continue with call setup...
+          const pc = createPeerConnection();
+          if (incomingCall.offer) {
+            await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+            const answer = await pc.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+            await pc.setLocalDescription(answer);
+            socket.emit('call-answer', { to: incomingCall.from, answer: answer });
+          }
+          setCallStatus('active');
+          callStatusRef.current = 'active';
+          setActiveCall({
+            userId: incomingCall.from,
+            userName: incomingCall.userName,
+            userProfilePic: incomingCall.userProfilePic,
+            isIncoming: true
+          });
+          setIncomingCall(null);
+          startCallTimer();
+          toast.success('Call connected');
+          return;
+        } catch (fallbackError) {
+          errorMessage = 'Failed to access microphone. Please check permissions.';
+        }
       } else {
-        errorMessage += 'Please check microphone permissions.';
+        errorMessage += 'Please check microphone permissions and try again.';
       }
       
       toast.error(errorMessage);
-      rejectCall();
+      setIncomingCall(null);
+      endCall();
     }
   };
 
