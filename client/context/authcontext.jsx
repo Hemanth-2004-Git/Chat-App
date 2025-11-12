@@ -68,9 +68,16 @@ export const AuthContextProvider = ({ children }) => {
   useEffect(() => {
     let currentSocket = null;
     let tokenRefreshInterval = null;
+    let loadingTimeout = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
+      
+      // Clear any existing loading timeout
+      if (loadingTimeout) {
+        clearTimeout(loadingTimeout);
+        loadingTimeout = null;
+      }
       
       // Clean up existing socket and token refresh interval before creating new one
       if (currentSocket) {
@@ -82,6 +89,13 @@ export const AuthContextProvider = ({ children }) => {
         clearInterval(tokenRefreshInterval);
         tokenRefreshInterval = null;
       }
+      
+      // Set a safety timeout to prevent infinite loading in WebView
+      loadingTimeout = setTimeout(() => {
+        console.warn("⚠️ Auth check taking too long, setting loading to false");
+        setLoading(false);
+        loadingTimeout = null;
+      }, 15000); // 15 second safety timeout
 
       if (firebaseUser) {
         try {
@@ -92,11 +106,21 @@ export const AuthContextProvider = ({ children }) => {
           // Send token to backend to verify and get user data
           console.log("Axios instance baseURL:", axiosInstance.defaults.baseURL);
           console.log("Calling /auth/check with baseURL:", axiosInstance.defaults.baseURL);
-          const { data } = await axiosInstance.get("/auth/check", {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+          
+          // Add timeout for WebView compatibility (10 seconds)
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Request timeout')), 10000);
           });
+          
+          const { data } = await Promise.race([
+            axiosInstance.get("/auth/check", {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+              timeout: 10000, // 10 second timeout
+            }),
+            timeoutPromise
+          ]);
 
           if (data.success) {
             // Store the ID token for future requests
@@ -172,9 +196,10 @@ export const AuthContextProvider = ({ children }) => {
           if (err.response?.status === 401) {
             console.warn("⚠️ Authentication failed - Token expired or invalid");
             console.warn("💡 User needs to log in again");
-          } else if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-            console.error("❌ Network error - Backend server may not be running");
+          } else if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error') || err.message === 'Request timeout') {
+            console.error("❌ Network error or timeout - Backend server may not be running or unreachable");
             console.error("💡 Check if backend server is running on:", API_URL);
+            console.error("💡 In WebView, ensure network permissions are granted and server is accessible");
           } else if (err.response?.status === 404) {
             console.error("❌ Route not found - Check backend routes");
           }
@@ -197,6 +222,12 @@ export const AuthContextProvider = ({ children }) => {
           tokenRefreshInterval = null;
         }
       }
+      
+      // Clear loading timeout and set loading to false
+      if (loadingTimeout) {
+        clearTimeout(loadingTimeout);
+        loadingTimeout = null;
+      }
       setLoading(false);
     });
 
@@ -207,6 +238,9 @@ export const AuthContextProvider = ({ children }) => {
       }
       if (tokenRefreshInterval) {
         clearInterval(tokenRefreshInterval);
+      }
+      if (loadingTimeout) {
+        clearTimeout(loadingTimeout);
       }
     };
   }, [axiosInstance]);
