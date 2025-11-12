@@ -351,6 +351,32 @@ io.on("connection", (socket) => {
         }
     });
 
+    socket.on("restart-ice", (data) => {
+        const { to, sdp } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("restart-ice", {
+                from: userId,
+                sdp: sdp
+            });
+            console.log(`🔄 ICE restart initiated from ${userId} to ${to}`);
+        }
+    });
+
+    socket.on("restart-ice-answer", (data) => {
+        const { to, sdp } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("restart-ice-answer", {
+                from: userId,
+                sdp: sdp
+            });
+            console.log(`📥 ICE restart answer from ${userId} to ${to}`);
+        }
+    });
+
     socket.on("disconnect", () => {
         console.log("🔴 User disconnected - User ID:", userId);
         if (userId) {
