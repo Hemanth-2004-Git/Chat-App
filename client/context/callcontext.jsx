@@ -759,11 +759,31 @@ export const CallContextProvider = ({ children, socket }) => {
               
               const audioContext = audioContextRef.current;
               
-              // Resume audio context if suspended (required by some browsers)
+              // Chrome requires user interaction to resume AudioContext
+              // Resume audio context if suspended (required by Chrome and some browsers)
               if (audioContext.state === 'suspended') {
-                audioContext.resume().then(() => {
-                  console.log('✅ AudioContext resumed');
-                });
+                // Try to resume immediately
+                const resumePromise = audioContext.resume();
+                if (resumePromise) {
+                  resumePromise.then(() => {
+                    console.log('✅ AudioContext resumed');
+                  }).catch(err => {
+                    console.warn('⚠️ Failed to resume AudioContext automatically:', err);
+                    // Chrome might need user interaction - try again on next user interaction
+                    const resumeOnInteraction = () => {
+                      if (audioContext.state === 'suspended') {
+                        audioContext.resume().then(() => {
+                          console.log('✅ AudioContext resumed after user interaction');
+                        }).catch(console.warn);
+                      }
+                      // Remove listeners after first success
+                      document.removeEventListener('click', resumeOnInteraction);
+                      document.removeEventListener('touchstart', resumeOnInteraction);
+                    };
+                    document.addEventListener('click', resumeOnInteraction, { once: true });
+                    document.addEventListener('touchstart', resumeOnInteraction, { once: true });
+                  });
+                }
               }
               
               // Create media stream source
@@ -796,31 +816,60 @@ export const CallContextProvider = ({ children, socket }) => {
               audio.muted = false;
               audio.volume = 1.0;
               
+              // Chrome: Set autoplay and playsinline attributes
+              audio.setAttribute('autoplay', 'true');
+              audio.setAttribute('playsinline', 'true');
+              audio.setAttribute('webkit-playsinline', 'true');
+              
               console.log('▶️ Attempting to play remote audio via HTML element...');
-              audio.play().then(() => {
-                console.log('✅ Remote audio playing successfully!');
-                console.log('🔊 Audio state:', {
-                  paused: audio.paused,
-                  muted: audio.muted,
-                  volume: audio.volume,
-                  readyState: audio.readyState,
-                  trackEnabled: audioTrack.enabled,
-                  trackMuted: audioTrack.muted
-                });
-                
-                // Monitor if audio pauses unexpectedly
-                const checkPlaying = setInterval(() => {
-                  if (audio.paused && stream.active && audioTrack.readyState === 'live') {
-                    console.warn('⚠️ Audio paused unexpectedly, attempting to resume...');
-                    audio.play().catch(err => {
-                      console.warn('Failed to resume:', err);
-                    });
+              
+              // Chrome: Try to play with user interaction context
+              const playAudio = async () => {
+                try {
+                  await audio.play();
+                  console.log('✅ Remote audio playing successfully!');
+                  console.log('🔊 Audio state:', {
+                    paused: audio.paused,
+                    muted: audio.muted,
+                    volume: audio.volume,
+                    readyState: audio.readyState,
+                    trackEnabled: audioTrack.enabled,
+                    trackMuted: audioTrack.muted
+                  });
+                  
+                  // Monitor if audio pauses unexpectedly
+                  const checkPlaying = setInterval(() => {
+                    if (audio.paused && stream.active && audioTrack.readyState === 'live') {
+                      console.warn('⚠️ Audio paused unexpectedly, attempting to resume...');
+                      audio.play().catch(err => {
+                        console.warn('Failed to resume:', err);
+                      });
+                    }
+                  }, 1000);
+                  
+                  // Store interval to clear later
+                  audio._playingCheck = checkPlaying;
+                } catch (playError) {
+                  // Chrome autoplay policy - might need user interaction
+                  if (playError.name === 'NotAllowedError' || playError.name === 'NotSupportedError') {
+                    console.warn('⚠️ Chrome autoplay blocked, waiting for user interaction...');
+                    // Try again on next user interaction
+                    const playOnInteraction = () => {
+                      audio.play().then(() => {
+                        console.log('✅ Audio playing after user interaction');
+                      }).catch(console.warn);
+                      document.removeEventListener('click', playOnInteraction);
+                      document.removeEventListener('touchstart', playOnInteraction);
+                    };
+                    document.addEventListener('click', playOnInteraction, { once: true });
+                    document.addEventListener('touchstart', playOnInteraction, { once: true });
+                  } else {
+                    throw playError;
                   }
-                }, 1000);
-                
-                // Store interval to clear later
-                audio._playingCheck = checkPlaying;
-              }).catch(err => {
+                }
+              };
+              
+              playAudio().catch(err => {
                 console.warn('⚠️ Auto-play prevented, will retry:', err);
                 // Retry on user interaction
                 const retryPlay = () => {
@@ -1611,9 +1660,42 @@ export const CallContextProvider = ({ children, socket }) => {
         video: false
       };
 
+      // Check permission state first (Chrome-specific)
+      let permissionStatus = null;
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          permissionStatus = await navigator.permissions.query({ name: 'microphone' });
+          console.log('🎤 Microphone permission state:', permissionStatus.state);
+          
+          if (permissionStatus.state === 'denied') {
+            toast.error('Microphone permission denied. Please enable it in Chrome settings (chrome://settings/content/microphone)');
+            endCall();
+            return;
+          }
+        }
+      } catch (permError) {
+        // Permissions API might not be available, continue anyway
+        console.log('ℹ️ Permissions API not available, proceeding with getUserMedia');
+      }
+      
       console.log('🎤 Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('✅ Microphone access granted, stream obtained:', stream);
+      
+      // Chrome: Ensure AudioContext is ready before proceeding
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      // Chrome: Resume AudioContext if suspended (requires user interaction)
+      if (audioContextRef.current.state === 'suspended') {
+        try {
+          await audioContextRef.current.resume();
+          console.log('✅ AudioContext resumed for Chrome');
+        } catch (resumeError) {
+          console.warn('⚠️ AudioContext resume failed, will retry on user interaction:', resumeError);
+        }
+      }
       
       // Monitor local tracks for automatic re-capture if they end
       stream.getAudioTracks().forEach(track => {
@@ -1744,9 +1826,42 @@ export const CallContextProvider = ({ children, socket }) => {
         video: false
       };
 
+      // Check permission state first (Chrome-specific)
+      let permissionStatus = null;
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          permissionStatus = await navigator.permissions.query({ name: 'microphone' });
+          console.log('🎤 Microphone permission state:', permissionStatus.state);
+          
+          if (permissionStatus.state === 'denied') {
+            toast.error('Microphone permission denied. Please enable it in Chrome settings (chrome://settings/content/microphone)');
+            setIncomingCall(null);
+            return;
+          }
+        }
+      } catch (permError) {
+        // Permissions API might not be available, continue anyway
+        console.log('ℹ️ Permissions API not available, proceeding with getUserMedia');
+      }
+      
       console.log('🎤 Requesting microphone access to accept call...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('✅ Microphone access granted, stream obtained:', stream);
+      
+      // Chrome: Ensure AudioContext is ready before proceeding
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      // Chrome: Resume AudioContext if suspended (user interaction already happened via button click)
+      if (audioContextRef.current.state === 'suspended') {
+        try {
+          await audioContextRef.current.resume();
+          console.log('✅ AudioContext resumed for Chrome (user interaction via accept button)');
+        } catch (resumeError) {
+          console.warn('⚠️ AudioContext resume failed:', resumeError);
+        }
+      }
       
       // Monitor local tracks for automatic re-capture if they end
       stream.getAudioTracks().forEach(track => {
