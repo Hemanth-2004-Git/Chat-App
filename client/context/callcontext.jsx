@@ -268,7 +268,29 @@ export const CallContextProvider = ({ children, socket }) => {
       
       if (event.streams && event.streams.length > 0) {
         const remoteStream = event.streams[0];
-        console.log('📹 Remote stream tracks:', remoteStream.getTracks());
+        const tracks = remoteStream.getTracks();
+        console.log('📹 Remote stream tracks:', tracks);
+        
+        // Ensure all tracks are enabled
+        tracks.forEach(track => {
+          if (track.kind === 'audio') {
+            track.enabled = true;
+            console.log('🎵 Audio track enabled:', track.id, 'enabled:', track.enabled, 'muted:', track.muted, 'readyState:', track.readyState);
+            
+            // Monitor track state
+            track.onended = () => {
+              console.warn('⚠️ Audio track ended!');
+            };
+            
+            track.onmute = () => {
+              console.warn('⚠️ Audio track muted!');
+            };
+            
+            track.onunmute = () => {
+              console.log('✅ Audio track unmuted');
+            };
+          }
+        });
         
         // Store stream in ref for later use
         remoteStreamRef.current = remoteStream;
@@ -276,12 +298,25 @@ export const CallContextProvider = ({ children, socket }) => {
         // Function to attach stream to audio element
         const attachStreamToAudio = () => {
           if (remoteVideoRef.current) {
-            // Stop any existing stream
+            // Stop any existing stream tracks (but keep the stream object)
             if (remoteVideoRef.current.srcObject) {
-              remoteVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
+              const oldTracks = remoteVideoRef.current.srcObject.getTracks();
+              oldTracks.forEach(track => {
+                if (track.readyState !== 'ended') {
+                  track.stop();
+                }
+              });
             }
             
-            remoteVideoRef.current.srcObject = remoteStream;
+            // Create a new MediaStream with the tracks to ensure it stays alive
+            const newStream = new MediaStream();
+            tracks.forEach(track => {
+              if (track.readyState !== 'ended') {
+                newStream.addTrack(track);
+              }
+            });
+            
+            remoteVideoRef.current.srcObject = newStream;
           
           // Ensure remote audio is NOT muted and volume is set
           remoteVideoRef.current.muted = false;
@@ -302,28 +337,68 @@ export const CallContextProvider = ({ children, socket }) => {
           // Force play audio - works for both desktop and mobile
           const playRemoteAudio = () => {
             if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+              const audio = remoteVideoRef.current;
+              const stream = audio.srcObject;
+              const audioTracks = stream.getAudioTracks();
+              
+              // Check track state
+              if (audioTracks.length === 0) {
+                console.warn('⚠️ No audio tracks in stream!');
+                return;
+              }
+              
+              const audioTrack = audioTracks[0];
+              console.log('🎵 Audio track state:', {
+                enabled: audioTrack.enabled,
+                muted: audioTrack.muted,
+                readyState: audioTrack.readyState,
+                id: audioTrack.id
+              });
+              
+              // Ensure track is enabled
+              if (!audioTrack.enabled) {
+                console.log('🔧 Enabling audio track...');
+                audioTrack.enabled = true;
+              }
+              
               // Ensure not muted and volume is max
-              remoteVideoRef.current.muted = false;
-              remoteVideoRef.current.volume = 1.0;
+              audio.muted = false;
+              audio.volume = 1.0;
               
               console.log('▶️ Attempting to play remote audio...');
-              remoteVideoRef.current.play().then(() => {
+              audio.play().then(() => {
                 console.log('✅ Remote audio playing successfully!');
                 console.log('🔊 Audio state:', {
-                  paused: remoteVideoRef.current.paused,
-                  muted: remoteVideoRef.current.muted,
-                  volume: remoteVideoRef.current.volume,
-                  readyState: remoteVideoRef.current.readyState
+                  paused: audio.paused,
+                  muted: audio.muted,
+                  volume: audio.volume,
+                  readyState: audio.readyState,
+                  trackEnabled: audioTrack.enabled,
+                  trackMuted: audioTrack.muted
                 });
+                
+                // Monitor if audio pauses unexpectedly
+                const checkPlaying = setInterval(() => {
+                  if (audio.paused && stream.active) {
+                    console.warn('⚠️ Audio paused unexpectedly, attempting to resume...');
+                    audio.play().catch(err => {
+                      console.warn('Failed to resume:', err);
+                    });
+                  }
+                }, 1000);
+                
+                // Store interval to clear later
+                audio._playingCheck = checkPlaying;
               }).catch(err => {
                 console.warn('⚠️ Auto-play prevented, will retry:', err);
                 // Retry on user interaction
                 const retryPlay = () => {
-                  if (remoteVideoRef.current) {
-                    remoteVideoRef.current.muted = false;
-                    remoteVideoRef.current.volume = 1.0;
+                  if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+                    const audio = remoteVideoRef.current;
+                    audio.muted = false;
+                    audio.volume = 1.0;
                     console.log('🔄 Retrying audio play on user interaction...');
-                    remoteVideoRef.current.play().then(() => {
+                    audio.play().then(() => {
                       console.log('✅ Remote audio playing after user interaction!');
                     }).catch(console.error);
                   }
@@ -367,11 +442,40 @@ export const CallContextProvider = ({ children, socket }) => {
           
           remoteVideoRef.current.onpause = () => {
             console.warn('⏸️ Remote audio paused');
+            // Try to resume if stream is still active
+            if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
+              const stream = remoteVideoRef.current.srcObject;
+              if (stream.active) {
+                const tracks = stream.getAudioTracks();
+                if (tracks.length > 0 && tracks[0].readyState === 'live') {
+                  console.log('🔄 Attempting to resume paused audio...');
+                  setTimeout(() => {
+                    if (remoteVideoRef.current && !remoteVideoRef.current.paused) return;
+                    remoteVideoRef.current?.play().catch(err => {
+                      console.warn('Failed to resume:', err);
+                    });
+                  }, 100);
+                }
+              }
+            }
           };
           
           remoteVideoRef.current.onerror = (e) => {
             console.error('❌ Remote audio error:', e);
           };
+          
+          // Monitor stream active state
+          if (remoteStream) {
+            const checkStreamActive = setInterval(() => {
+              if (!remoteStream.active) {
+                console.warn('⚠️ Remote stream became inactive!');
+                clearInterval(checkStreamActive);
+              }
+            }, 2000);
+            
+            // Store interval reference
+            remoteStream._activeCheck = checkStreamActive;
+          }
           
           return true; // Successfully attached
         } else {
@@ -695,6 +799,16 @@ export const CallContextProvider = ({ children, socket }) => {
 
   // End call
   const endCall = () => {
+    // Clear any playing check intervals
+    if (remoteVideoRef.current && remoteVideoRef.current._playingCheck) {
+      clearInterval(remoteVideoRef.current._playingCheck);
+    }
+    
+    // Clear stream active checks
+    if (remoteStreamRef.current && remoteStreamRef.current._activeCheck) {
+      clearInterval(remoteStreamRef.current._activeCheck);
+    }
+    
     // Stop local stream
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());

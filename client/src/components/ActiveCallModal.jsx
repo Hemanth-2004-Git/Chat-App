@@ -46,11 +46,28 @@ const ActiveCallModal = () => {
               });
               
               // If audio is paused but should be playing, try to play
-              if (audio.paused && audio.srcObject && audio.readyState >= 2) {
-                console.log('🔄 Audio is paused, attempting to resume...');
-                audio.play().catch(err => {
-                  console.warn('Failed to resume audio:', err);
-                });
+              if (audio.paused && audio.srcObject) {
+                const stream = audio.srcObject;
+                const tracks = stream.getAudioTracks();
+                const audioTrack = tracks.find(t => t.kind === 'audio');
+                
+                if (audioTrack && audioTrack.readyState === 'live' && stream.active) {
+                  console.log('🔄 Audio is paused but stream is active, attempting to resume...');
+                  audio.muted = false;
+                  audio.volume = 1.0;
+                  if (!audioTrack.enabled) {
+                    audioTrack.enabled = true;
+                  }
+                  audio.play().catch(err => {
+                    console.warn('Failed to resume audio:', err);
+                  });
+                } else {
+                  console.warn('⚠️ Cannot resume: track state:', {
+                    hasTrack: !!audioTrack,
+                    trackReadyState: audioTrack?.readyState,
+                    streamActive: stream.active
+                  });
+                }
               }
             } else {
               // Try to get stream from context if available
