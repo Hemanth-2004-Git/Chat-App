@@ -9,6 +9,8 @@ const isWebView = window.navigator.standalone ||
                   window.matchMedia('(display-mode: standalone)').matches ||
                   /wv|WebView/i.test(navigator.userAgent) ||
                   (!window.chrome && navigator.userAgent.includes('Android'));
+// Detect Chrome browser (for Chrome-specific fixes)
+const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor) && !/Edge|Edg/.test(navigator.userAgent);
 
 export const CallContext = createContext();
 
