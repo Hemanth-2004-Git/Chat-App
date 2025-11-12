@@ -327,20 +327,34 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('🔄 Received ICE restart offer:', data);
       if (peerConnectionRef.current && data.sdp) {
         try {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          const answer = await peerConnectionRef.current.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
-          await peerConnectionRef.current.setLocalDescription(answer);
+          const pc = peerConnectionRef.current;
+          const signalingState = pc.signalingState;
           
-          const targetUserId = activeCall?.userId || incomingCall?.from;
-          if (targetUserId && socket) {
-            socket.emit('restart-ice-answer', {
-              to: targetUserId,
-              sdp: answer
-            });
-            console.log('📤 Sent ICE restart answer');
+          console.log('🔧 Current signaling state for ICE restart:', signalingState);
+          
+          // Should be in "stable" state when receiving an ICE restart offer
+          if (signalingState === 'stable' || signalingState === 'have-local-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            const answer = await pc.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+            await pc.setLocalDescription(answer);
+            
+            const targetUserId = activeCall?.userId || incomingCall?.from;
+            if (targetUserId && socket) {
+              socket.emit('restart-ice-answer', {
+                to: targetUserId,
+                sdp: answer
+              });
+              console.log('📤 Sent ICE restart answer');
+            }
+          } else {
+            console.warn('⚠️ Cannot handle ICE restart: wrong signaling state', signalingState);
+            console.warn('⚠️ Expected state: stable or have-local-offer');
           }
         } catch (error) {
           console.error('Error handling ICE restart:', error);
+          if (error.name === 'InvalidStateError') {
+            console.warn('⚠️ Invalid state error - ICE restart offer may have been processed already');
+          }
         }
       }
     };
