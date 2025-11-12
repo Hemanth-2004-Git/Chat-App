@@ -271,31 +271,54 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('📥 Received answer:', data);
       if (peerConnectionRef.current) {
         try {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-          setCallStatus('active');
-          callStatusRef.current = 'active';
-          reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful answer
-          startCallTimer();
+          const pc = peerConnectionRef.current;
+          const signalingState = pc.signalingState;
           
-          // Clear call timeout if exists
-          if (peerConnectionRef.current._callTimeout) {
-            clearTimeout(peerConnectionRef.current._callTimeout);
-            peerConnectionRef.current._callTimeout = null;
-          }
+          console.log('🔧 Current signaling state:', signalingState);
           
-          // Ensure remote audio is ready to play when stream arrives
-          setTimeout(() => {
-            if (remoteVideoRef.current) {
-              remoteVideoRef.current.muted = false;
-              if (remoteVideoRef.current.srcObject) {
-                remoteVideoRef.current.play().catch(err => {
-                  console.log('Remote audio play attempt after answer:', err);
-                });
-              }
+          // Only set remote description if we're in the correct state
+          // We should be in "have-local-offer" state when receiving an answer
+          if (signalingState === 'have-local-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            console.log('✅ Remote description (answer) set successfully');
+            
+            setCallStatus('active');
+            callStatusRef.current = 'active';
+            reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful answer
+            startCallTimer();
+            
+            // Clear call timeout if exists
+            if (pc._callTimeout) {
+              clearTimeout(pc._callTimeout);
+              pc._callTimeout = null;
             }
-          }, 500);
+            
+            // Ensure remote audio is ready to play when stream arrives
+            setTimeout(() => {
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.muted = false;
+                if (remoteVideoRef.current.srcObject) {
+                  remoteVideoRef.current.play().catch(err => {
+                    console.log('Remote audio play attempt after answer:', err);
+                  });
+                }
+              }
+            }, 500);
+          } else if (signalingState === 'stable') {
+            // Already processed this answer or connection is already established
+            console.log('ℹ️ Answer received but signaling state is already stable - ignoring duplicate answer');
+          } else {
+            console.warn('⚠️ Cannot set remote description: wrong signaling state', signalingState);
+            console.warn('⚠️ Expected state: have-local-offer, got:', signalingState);
+          }
         } catch (error) {
           console.error('Error handling answer:', error);
+          // If it's a state error, log it but don't crash
+          if (error.name === 'InvalidStateError') {
+            console.warn('⚠️ Invalid state error - answer may have been processed already');
+          } else {
+            throw error;
+          }
         }
       }
     };
@@ -326,10 +349,25 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('📥 Received ICE restart answer:', data);
       if (peerConnectionRef.current && data.sdp) {
         try {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          console.log('✅ ICE restart answer processed');
+          const pc = peerConnectionRef.current;
+          const signalingState = pc.signalingState;
+          
+          console.log('🔧 Current signaling state for ICE restart answer:', signalingState);
+          
+          // Should be in "have-local-offer" state when receiving ICE restart answer
+          if (signalingState === 'have-local-offer' || signalingState === 'have-remote-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            console.log('✅ ICE restart answer processed');
+          } else if (signalingState === 'stable') {
+            console.log('ℹ️ ICE restart answer received but state is stable - may be duplicate');
+          } else {
+            console.warn('⚠️ Cannot set ICE restart answer: wrong signaling state', signalingState);
+          }
         } catch (error) {
           console.error('Error handling ICE restart answer:', error);
+          if (error.name === 'InvalidStateError') {
+            console.warn('⚠️ Invalid state error - ICE restart answer may have been processed already');
+          }
         }
       }
     };
@@ -338,20 +376,33 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('🔄 Received renegotiation offer:', data);
       if (peerConnectionRef.current && data.sdp) {
         try {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          const answer = await peerConnectionRef.current.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
-          await peerConnectionRef.current.setLocalDescription(answer);
+          const pc = peerConnectionRef.current;
+          const signalingState = pc.signalingState;
           
-          const targetUserId = activeCall?.userId || incomingCall?.from;
-          if (targetUserId && socket) {
-            socket.emit('renegotiate-answer', {
-              to: targetUserId,
-              answer: answer
-            });
-            console.log('📤 Sent renegotiation answer');
+          console.log('🔧 Current signaling state for renegotiation:', signalingState);
+          
+          // Should be in "stable" state when receiving a renegotiation offer
+          if (signalingState === 'stable' || signalingState === 'have-local-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            const answer = await pc.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+            await pc.setLocalDescription(answer);
+            
+            const targetUserId = activeCall?.userId || incomingCall?.from;
+            if (targetUserId && socket) {
+              socket.emit('renegotiate-answer', {
+                to: targetUserId,
+                answer: answer
+              });
+              console.log('📤 Sent renegotiation answer');
+            }
+          } else {
+            console.warn('⚠️ Cannot handle renegotiation: wrong signaling state', signalingState);
           }
         } catch (error) {
           console.error('Error handling renegotiation:', error);
+          if (error.name === 'InvalidStateError') {
+            console.warn('⚠️ Invalid state error - renegotiation offer may have been processed already');
+          }
         }
       }
     };
@@ -360,10 +411,25 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('📥 Received renegotiation answer:', data);
       if (peerConnectionRef.current && data.sdp) {
         try {
-          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          console.log('✅ Renegotiation answer processed');
+          const pc = peerConnectionRef.current;
+          const signalingState = pc.signalingState;
+          
+          console.log('🔧 Current signaling state for renegotiation answer:', signalingState);
+          
+          // Should be in "have-local-offer" state when receiving renegotiation answer
+          if (signalingState === 'have-local-offer' || signalingState === 'have-remote-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            console.log('✅ Renegotiation answer processed');
+          } else if (signalingState === 'stable') {
+            console.log('ℹ️ Renegotiation answer received but state is stable - may be duplicate');
+          } else {
+            console.warn('⚠️ Cannot set renegotiation answer: wrong signaling state', signalingState);
+          }
         } catch (error) {
           console.error('Error handling renegotiation answer:', error);
+          if (error.name === 'InvalidStateError') {
+            console.warn('⚠️ Invalid state error - renegotiation answer may have been processed already');
+          }
         }
       }
     };
