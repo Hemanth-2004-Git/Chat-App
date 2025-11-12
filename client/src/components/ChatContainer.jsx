@@ -3,6 +3,7 @@ import assets from '../assets/assets'
 import { formatMessageTime, formatMessageDate } from '../libs/utils'
 import { chatContext } from '../../context/chatcontext.jsx'
 import { authcontext } from '../../context/authcontext.jsx'
+import { useCall } from '../../context/callcontext.jsx'
 import { useContext } from 'react'
 import { toast } from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
@@ -14,6 +15,7 @@ import CameraModal from './CameraModal'
 const ChatContainer = () => {
   const {messages, selectedUser, setSelectedUser, sendMessage, getMessages, users, deleteMessage, editMessage, forwardMessage, loadingMessages} = useContext(chatContext)
   const {authuser, onlineUsers, logout, socket} = useContext(authcontext)
+  const { initiateCall, activeCall } = useCall()
   const navigate = useNavigate()
 
   const scrollEnd = useRef()
@@ -660,6 +662,38 @@ const ChatContainer = () => {
           </button>
         ) : (
           <>
+            {/* Call Button - Only show for direct chats (not groups) */}
+            {!selectedUser?.isGroup && selectedUser?._id && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  try {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const userId = selectedUser._id || selectedUser.uid;
+                    const userName = selectedUser.fullName || selectedUser.name || 'Unknown User';
+                    const userProfilePic = selectedUser.profilePic || null;
+                    if (userId && !activeCall) {
+                      initiateCall(userId, userName, userProfilePic);
+                    } else if (activeCall) {
+                      toast.info('You are already in a call');
+                    }
+                  } catch (error) {
+                    console.error('Error initiating call:', error);
+                    toast.error('Failed to start call');
+                  }
+                }}
+                className="p-1.5 md:p-2 cursor-pointer hover:opacity-80 active:opacity-60 transition-opacity flex items-center justify-center w-9 h-9 md:w-10 md:h-10 touch-manipulation flex-shrink-0"
+                style={{ touchAction: 'manipulation', minWidth: '36px', minHeight: '36px' }}
+                title="Voice Call"
+                aria-label="Voice Call"
+                disabled={!!activeCall}
+              >
+                <svg className="w-5 h-5 md:w-6 md:h-6 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               onClick={(e) => {

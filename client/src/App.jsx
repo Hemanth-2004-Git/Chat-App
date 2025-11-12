@@ -6,6 +6,8 @@ import SignupPage from './pages/SignupPage'
 import ProfilePage from './pages/ProfilePage'
 import {Toaster} from "react-hot-toast"
 import { authcontext } from '../context/authcontext.jsx'
+import IncomingCallModal from './components/IncomingCallModal'
+import ActiveCallModal from './components/ActiveCallModal'
 
 const App = () => {
   const { authuser, isLoading } = useContext(authcontext)
@@ -35,6 +37,14 @@ const App = () => {
           }
         }}
       />
+
+      {/* VoIP Call Modals */}
+      {authuser && (
+        <>
+          <IncomingCallModal />
+          <ActiveCallModal />
+        </>
+      )}
 
       <Routes>
         {/* Public routes */}

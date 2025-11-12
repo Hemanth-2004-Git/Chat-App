@@ -1,0 +1,549 @@
+// client/context/callcontext.jsx
+
+import { createContext, useContext, useState, useRef, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
+
+// Detect mobile and WebView environment
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+const isWebView = window.navigator.standalone || 
+                  window.matchMedia('(display-mode: standalone)').matches ||
+                  /wv|WebView/i.test(navigator.userAgent) ||
+                  (!window.chrome && navigator.userAgent.includes('Android'));
+
+export const CallContext = createContext();
+
+// Free STUN servers (Google's public STUN)
+const STUN_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' }
+];
+
+// Free TURN server (Metered.ca - 100GB/month free)
+// You can also use your own TURN server or other free services
+const TURN_SERVERS = [
+  {
+    urls: 'turn:a.relay.metered.ca:80',
+    username: 'a1b2c3d4e5f6g7h8i9j0', // Replace with your Metered.ca credentials
+    credential: 'a1b2c3d4e5f6g7h8i9j0' // Replace with your Metered.ca credentials
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443',
+    username: 'a1b2c3d4e5f6g7h8i9j0',
+    credential: 'a1b2c3d4e5f6g7h8i9j0'
+  }
+];
+
+// For now, use only STUN (works for most cases)
+// Add TURN servers if you have credentials
+const ICE_SERVERS = {
+  iceServers: [
+    ...STUN_SERVERS,
+    // Uncomment and add your TURN credentials if needed:
+    // ...TURN_SERVERS
+  ]
+};
+
+export const CallContextProvider = ({ children, socket }) => {
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [activeCall, setActiveCall] = useState(null);
+  const [callStatus, setCallStatus] = useState('idle'); // idle, calling, ringing, active, ended
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  
+  const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const callTimerRef = useRef(null);
+  const callStatusRef = useRef('idle');
+  const [callDuration, setCallDuration] = useState(0);
+
+  // Initialize socket listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleIncomingCall = (data) => {
+      console.log('📞 Incoming call:', data);
+      setIncomingCall(data);
+      setCallStatus('ringing');
+      callStatusRef.current = 'ringing';
+      
+      // Play ringtone (optional)
+      // You can add a ringtone audio file here
+    };
+
+    const handleCallAccepted = (data) => {
+      console.log('✅ Call accepted:', data);
+      if (callStatusRef.current === 'calling') {
+        setCallStatus('active');
+        callStatusRef.current = 'active';
+        setActiveCall(data);
+        setIncomingCall(null);
+        startCallTimer();
+      }
+    };
+
+    const handleCallRejected = (data) => {
+      console.log('❌ Call rejected:', data);
+      // Reset call state without calling endCall to avoid cleanup issues
+      setActiveCall(null);
+      setIncomingCall(null);
+      setCallStatus('idle');
+      callStatusRef.current = 'idle';
+      stopCallTimer();
+      toast.error('Call rejected');
+    };
+
+    const handleCallEnded = (data) => {
+      console.log('📴 Call ended:', data);
+      // Reset call state
+      setActiveCall(null);
+      setIncomingCall(null);
+      setCallStatus('idle');
+      callStatusRef.current = 'idle';
+      stopCallTimer();
+      toast.info('Call ended');
+    };
+
+    const handleCallAnswer = (data) => {
+      console.log('📞 Call answered:', data);
+      if (callStatusRef.current === 'calling') {
+        setCallStatus('active');
+        callStatusRef.current = 'active';
+        setActiveCall(prev => prev || data);
+        setIncomingCall(null);
+        startCallTimer();
+      }
+    };
+
+    const handleICE = async (data) => {
+      console.log('🧊 Received ICE candidate:', data);
+      if (peerConnectionRef.current && data.candidate) {
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (error) {
+          console.error('Error adding ICE candidate:', error);
+        }
+      }
+    };
+
+    const handleOffer = async (data) => {
+      console.log('📥 Received offer:', data);
+      // This is handled in acceptCall, but we can also handle it here if needed
+      // The offer is already in incomingCall state
+    };
+
+    const handleAnswer = async (data) => {
+      console.log('📥 Received answer:', data);
+      if (peerConnectionRef.current) {
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          setCallStatus('active');
+          callStatusRef.current = 'active';
+          startCallTimer();
+          
+          // Clear call timeout if exists
+          if (peerConnectionRef.current._callTimeout) {
+            clearTimeout(peerConnectionRef.current._callTimeout);
+            peerConnectionRef.current._callTimeout = null;
+          }
+        } catch (error) {
+          console.error('Error handling answer:', error);
+        }
+      }
+    };
+
+    socket.on('incoming-call', handleIncomingCall);
+    socket.on('call-accepted', handleCallAccepted);
+    socket.on('call-rejected', handleCallRejected);
+    socket.on('call-ended', handleCallEnded);
+    socket.on('call-answer', handleAnswer); // This handles the WebRTC answer
+    socket.on('ice-candidate', handleICE);
+
+    return () => {
+      socket.off('incoming-call', handleIncomingCall);
+      socket.off('call-accepted', handleCallAccepted);
+      socket.off('call-rejected', handleCallRejected);
+      socket.off('call-ended', handleCallEnded);
+      socket.off('call-answer', handleAnswer);
+      socket.off('ice-candidate', handleICE);
+    };
+  }, [socket]);
+
+  // Create peer connection
+  const createPeerConnection = () => {
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    
+    // Add local stream tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    // Handle remote stream
+    pc.ontrack = (event) => {
+      console.log('📹 Received remote stream');
+      if (remoteVideoRef.current) {
+        const remoteStream = event.streams[0];
+        remoteVideoRef.current.srcObject = remoteStream;
+        remoteStreamRef.current = remoteStream;
+        
+        // For mobile/WebView: ensure audio plays
+        if (isMobile || isWebView) {
+          setTimeout(() => {
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.play().catch(err => {
+                console.warn('Auto-play prevented, user interaction required:', err);
+                // Try to play on user interaction
+                const playAudio = () => {
+                  if (remoteVideoRef.current) {
+                    remoteVideoRef.current.play().catch(console.error);
+                  }
+                  document.removeEventListener('touchstart', playAudio);
+                  document.removeEventListener('click', playAudio);
+                };
+                document.addEventListener('touchstart', playAudio, { once: true });
+                document.addEventListener('click', playAudio, { once: true });
+              });
+            }
+          }, 100);
+        }
+      }
+    };
+
+    // Handle ICE candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socket && activeCall) {
+        socket.emit('ice-candidate', {
+          to: activeCall.userId,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    // Handle connection state changes
+    pc.onconnectionstatechange = () => {
+      console.log('🔌 Connection state:', pc.connectionState);
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        endCall();
+        toast.error('Call disconnected');
+      }
+    };
+
+    peerConnectionRef.current = pc;
+    return pc;
+  };
+
+  // Start call timer
+  const startCallTimer = () => {
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+    }
+    setCallDuration(0);
+    callTimerRef.current = setInterval(() => {
+      setCallDuration(prev => prev + 1);
+    }, 1000);
+  };
+
+  // Stop call timer
+  const stopCallTimer = () => {
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    setCallDuration(0);
+  };
+
+  // Format call duration
+  const formatCallDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Initiate call
+  const initiateCall = async (userId, userName, userProfilePic) => {
+    if (!socket) {
+      toast.error('Not connected to server');
+      return;
+    }
+
+    try {
+      setCallStatus('calling');
+      callStatusRef.current = 'calling';
+      setActiveCall({ userId, userName, userProfilePic, isIncoming: false });
+
+      // Get user media (audio only for VoIP)
+      // For mobile/WebView, request with specific constraints
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          // For Android WebView, sometimes need to specify sample rate
+          ...(isMobile && {
+            sampleRate: 48000,
+            channelCount: 1
+          })
+        },
+        video: false
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        // For mobile, ensure audio element is set up correctly
+        if (isMobile || isWebView) {
+          localVideoRef.current.setAttribute('playsinline', 'true');
+          localVideoRef.current.setAttribute('webkit-playsinline', 'true');
+          localVideoRef.current.muted = true; // Local audio should be muted to avoid feedback
+        }
+      }
+
+      // Create peer connection
+      const pc = createPeerConnection();
+
+      // Create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Send call request
+      socket.emit('call-user', {
+        to: userId,
+        offer: offer
+      });
+
+      // Set timeout for call (30 seconds)
+      const timeoutId = setTimeout(() => {
+        if (callStatusRef.current === 'calling') {
+          endCall();
+          toast.error('Call timeout - User not available');
+        }
+      }, 30000);
+      
+      // Store timeout ID to clear if call connects
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current._callTimeout = timeoutId;
+      }
+
+    } catch (error) {
+      console.error('Error initiating call:', error);
+      
+      // Better error messages for mobile
+      let errorMessage = 'Failed to start call. ';
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage += 'Please allow microphone access in your browser/app settings.';
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage += 'No microphone found. Please connect a microphone.';
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage += 'Microphone is being used by another app.';
+      } else {
+        errorMessage += 'Please check microphone permissions.';
+      }
+      
+      toast.error(errorMessage);
+      endCall();
+    }
+  };
+
+  // Accept incoming call
+  const acceptCall = async () => {
+    if (!incomingCall || !socket) return;
+
+    try {
+      // Get user media with mobile-specific constraints
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          ...(isMobile && {
+            sampleRate: 48000,
+            channelCount: 1
+          })
+        },
+        video: false
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        // For mobile, ensure audio element is set up correctly
+        if (isMobile || isWebView) {
+          localVideoRef.current.setAttribute('playsinline', 'true');
+          localVideoRef.current.setAttribute('webkit-playsinline', 'true');
+          localVideoRef.current.muted = true; // Local audio should be muted to avoid feedback
+        }
+      }
+
+      // Create peer connection
+      const pc = createPeerConnection();
+
+      // Set remote description from offer
+      if (incomingCall.offer) {
+        await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+        
+        // Create answer
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        // Send answer
+        socket.emit('call-answer', {
+          to: incomingCall.from,
+          answer: answer
+        });
+      }
+
+      setCallStatus('active');
+      callStatusRef.current = 'active';
+      setActiveCall({
+        userId: incomingCall.from,
+        userName: incomingCall.userName,
+        userProfilePic: incomingCall.userProfilePic,
+        isIncoming: true
+      });
+      setIncomingCall(null);
+      startCallTimer();
+
+      toast.success('Call connected');
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      
+      // Better error messages for mobile
+      let errorMessage = 'Failed to accept call. ';
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage += 'Please allow microphone access in your browser/app settings.';
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage += 'No microphone found. Please connect a microphone.';
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage += 'Microphone is being used by another app.';
+      } else {
+        errorMessage += 'Please check microphone permissions.';
+      }
+      
+      toast.error(errorMessage);
+      rejectCall();
+    }
+  };
+
+  // Reject incoming call
+  const rejectCall = () => {
+    if (!incomingCall || !socket) return;
+
+    socket.emit('reject-call', {
+      to: incomingCall.from
+    });
+
+    setIncomingCall(null);
+    setCallStatus('idle');
+  };
+
+  // End call
+  const endCall = () => {
+    // Stop local stream
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+
+    // Stop remote stream
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach(track => track.stop());
+      remoteStreamRef.current = null;
+    }
+
+    // Close peer connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+
+    // Clear video refs
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+
+    // Emit end call event
+    if (socket && activeCall) {
+      socket.emit('end-call', {
+        to: activeCall.userId
+      });
+    }
+
+    // Reset state
+    setActiveCall(null);
+    setIncomingCall(null);
+    setCallStatus('idle');
+    callStatusRef.current = 'idle';
+    setIsMuted(false);
+    setIsVideoEnabled(false);
+    stopCallTimer();
+  };
+
+  // Toggle mute
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = isMuted;
+      });
+      setIsMuted(!isMuted);
+    }
+  };
+
+  // Toggle video (for future video call support)
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = !isVideoEnabled;
+      });
+      setIsVideoEnabled(!isVideoEnabled);
+    }
+  };
+
+  const value = {
+    // State
+    incomingCall,
+    activeCall,
+    callStatus,
+    isMuted,
+    isVideoEnabled,
+    callDuration: formatCallDuration(callDuration),
+    
+    // Refs
+    localVideoRef,
+    remoteVideoRef,
+    
+    // Functions
+    initiateCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    toggleVideo
+  };
+
+  return (
+    <CallContext.Provider value={value}>
+      {children}
+    </CallContext.Provider>
+  );
+};
+
+export const useCall = () => {
+  const context = useContext(CallContext);
+  if (!context) {
+    throw new Error('useCall must be used within CallContextProvider');
+  }
+  return context;
+};
+

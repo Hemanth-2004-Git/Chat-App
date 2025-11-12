@@ -262,6 +262,95 @@ io.on("connection", (socket) => {
         }
     });
 
+    // VoIP Call Signaling Events
+    socket.on("call-user", async (data) => {
+        const { to, offer } = data;
+        const fromSocketId = usersocketmap[userId];
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            // Get caller info from database
+            try {
+                const callerSnapshot = await db.ref(`users/${userId}`).once('value');
+                const callerData = callerSnapshot.val();
+                
+                io.to(toSocketId).emit("incoming-call", {
+                    from: userId,
+                    userName: callerData?.fullName || 'Unknown User',
+                    userProfilePic: callerData?.profilePic || null,
+                    offer: offer
+                });
+                
+                console.log(`📞 Call from ${userId} to ${to}`);
+            } catch (error) {
+                console.error("Error fetching caller info:", error);
+                io.to(toSocketId).emit("incoming-call", {
+                    from: userId,
+                    userName: 'Unknown User',
+                    userProfilePic: null,
+                    offer: offer
+                });
+            }
+        } else {
+            // User not online
+            if (fromSocketId) {
+                io.to(fromSocketId).emit("call-rejected", {
+                    from: to,
+                    reason: "User not available"
+                });
+            }
+        }
+    });
+
+    socket.on("call-answer", (data) => {
+        const { to, answer } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("call-answer", {
+                from: userId,
+                answer: answer
+            });
+            console.log(`✅ Call answered from ${userId} to ${to}`);
+        }
+    });
+
+    socket.on("reject-call", (data) => {
+        const { to } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("call-rejected", {
+                from: userId
+            });
+            console.log(`❌ Call rejected from ${userId} to ${to}`);
+        }
+    });
+
+    socket.on("end-call", (data) => {
+        const { to } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("call-ended", {
+                from: userId
+            });
+            console.log(`📴 Call ended from ${userId} to ${to}`);
+        }
+    });
+
+    socket.on("ice-candidate", (data) => {
+        const { to, candidate } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("ice-candidate", {
+                from: userId,
+                candidate: candidate
+            });
+        }
+    });
+
     socket.on("disconnect", () => {
         console.log("🔴 User disconnected - User ID:", userId);
         if (userId) {
