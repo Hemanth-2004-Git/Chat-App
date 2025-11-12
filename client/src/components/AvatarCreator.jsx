@@ -859,7 +859,7 @@ const AvatarCreator = ({ isOpen, onClose, onSave, currentProfilePic }) => {
                       )
                     }
                     
-                    toast.info('Attempting to capture avatar... Check console for details.')
+                    toast('Attempting to capture avatar... Check console for details.', { icon: 'ℹ️' })
                   }}
                   className="w-full px-4 py-2.5 bg-blue-600/80 text-white rounded-lg hover:bg-blue-600 transition-all font-medium text-sm border border-blue-500/50"
                   title="If you've created your avatar but it's not showing, click this"

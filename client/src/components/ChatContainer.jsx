@@ -676,7 +676,7 @@ const ChatContainer = () => {
                     if (userId && !activeCall) {
                       initiateCall(userId, userName, userProfilePic);
                     } else if (activeCall) {
-                      toast.info('You are already in a call');
+                      toast('You are already in a call', { icon: 'ℹ️' });
                     }
                   } catch (error) {
                     console.error('Error initiating call:', error);
