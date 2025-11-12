@@ -377,6 +377,32 @@ io.on("connection", (socket) => {
         }
     });
 
+    socket.on("renegotiate", (data) => {
+        const { to, offer } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("renegotiate", {
+                from: userId,
+                sdp: offer
+            });
+            console.log(`🔄 Renegotiation from ${userId} to ${to}`);
+        }
+    });
+
+    socket.on("renegotiate-answer", (data) => {
+        const { to, answer } = data;
+        const toSocketId = usersocketmap[to];
+        
+        if (toSocketId) {
+            io.to(toSocketId).emit("renegotiate-answer", {
+                from: userId,
+                sdp: answer
+            });
+            console.log(`📥 Renegotiation answer from ${userId} to ${to}`);
+        }
+    });
+
     socket.on("disconnect", () => {
         console.log("🔴 User disconnected - User ID:", userId);
         if (userId) {

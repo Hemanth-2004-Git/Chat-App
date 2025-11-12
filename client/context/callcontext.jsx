@@ -18,12 +18,22 @@ const STUN_SERVERS = [
 ];
 
 // TURN server (for relay when direct connection fails - essential for cross-network calls)
-// Using ExpressTurn free TURN server for reliable cross-network connectivity
+// Using OpenRelay free TURN server for reliable cross-network connectivity
 const TURN_SERVERS = [
   {
-    urls: 'turn:relay1.expressturn.com:3478',
-    username: 'efree',
-    credential: 'efree'
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
   }
 ];
 
@@ -276,6 +286,40 @@ export const CallContextProvider = ({ children, socket }) => {
       }
     };
 
+    const handleRenegotiate = async (data) => {
+      console.log('🔄 Received renegotiation offer:', data);
+      if (peerConnectionRef.current && data.sdp) {
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          const answer = await peerConnectionRef.current.createAnswer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+          await peerConnectionRef.current.setLocalDescription(answer);
+          
+          const targetUserId = activeCall?.userId || incomingCall?.from;
+          if (targetUserId && socket) {
+            socket.emit('renegotiate-answer', {
+              to: targetUserId,
+              answer: answer
+            });
+            console.log('📤 Sent renegotiation answer');
+          }
+        } catch (error) {
+          console.error('Error handling renegotiation:', error);
+        }
+      }
+    };
+
+    const handleRenegotiateAnswer = async (data) => {
+      console.log('📥 Received renegotiation answer:', data);
+      if (peerConnectionRef.current && data.sdp) {
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          console.log('✅ Renegotiation answer processed');
+        } catch (error) {
+          console.error('Error handling renegotiation answer:', error);
+        }
+      }
+    };
+
     socket.on('incoming-call', handleIncomingCall);
     socket.on('call-accepted', handleCallAccepted);
     socket.on('call-rejected', handleCallRejected);
@@ -284,6 +328,8 @@ export const CallContextProvider = ({ children, socket }) => {
     socket.on('ice-candidate', handleICE);
     socket.on('restart-ice', handleRestartIce);
     socket.on('restart-ice-answer', handleRestartIceAnswer);
+    socket.on('renegotiate', handleRenegotiate);
+    socket.on('renegotiate-answer', handleRenegotiateAnswer);
 
     return () => {
       socket.off('incoming-call', handleIncomingCall);
@@ -294,6 +340,8 @@ export const CallContextProvider = ({ children, socket }) => {
       socket.off('ice-candidate', handleICE);
       socket.off('restart-ice', handleRestartIce);
       socket.off('restart-ice-answer', handleRestartIceAnswer);
+      socket.off('renegotiate', handleRenegotiate);
+      socket.off('renegotiate-answer', handleRenegotiateAnswer);
     };
   }, [socket]);
 
@@ -871,11 +919,13 @@ export const CallContextProvider = ({ children, socket }) => {
         console.log('✅ Peer connection established!');
         console.log('🎧 Remote audio should be playing...');
         
-        // Log connection details for debugging
+        // Log connection details and verify audio flow
         pc.getStats().then(stats => {
           let hasRelay = false;
           let hasHost = false;
           let hasSrflx = false;
+          let audioBytesReceived = 0;
+          let audioBytesSent = 0;
           
           stats.forEach(report => {
             if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
@@ -886,18 +936,35 @@ export const CallContextProvider = ({ children, socket }) => {
               if (report.candidateType === 'host') hasHost = true;
               if (report.candidateType === 'srflx') hasSrflx = true;
             }
+            
+            // Check audio bytes flow
+            if (report.type === 'inbound-rtp' && report.mediaType === 'audio') {
+              audioBytesReceived = report.bytesReceived || 0;
+            }
+            if (report.type === 'outbound-rtp' && report.mediaType === 'audio') {
+              audioBytesSent = report.bytesSent || 0;
+            }
           });
           
           console.log('📊 Connection type summary:', {
             usingRelay: hasRelay,
             usingHost: hasHost,
             usingSrflx: hasSrflx,
+            audioBytesReceived: audioBytesReceived,
+            audioBytesSent: audioBytesSent,
             note: hasRelay 
               ? '✅ Using TURN (relay) - Excellent for cross-network calls!' 
               : hasSrflx 
                 ? 'ℹ️ Using STUN (srflx) - May work for cross-network'
                 : '⚠️ Using direct connection - May fail across different networks'
           });
+          
+          // Verify audio is flowing
+          if (audioBytesReceived > 0) {
+            console.log('✅ Audio bytes flowing - receiving audio data');
+          } else {
+            console.warn('⚠️ No audio bytes received yet - audio may not be working');
+          }
         }).catch(err => {
           console.warn('Failed to get connection stats:', err);
         });
@@ -1127,6 +1194,76 @@ export const CallContextProvider = ({ children, socket }) => {
     attemptReconnection();
   };
 
+  // Re-capture local audio if track ends
+  const reCaptureLocalAudio = async () => {
+    console.log('🔄 Re-capturing local audio...');
+    
+    try {
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          ...(isMobile && {
+            sampleRate: 48000,
+            channelCount: 1
+          })
+        },
+        video: false
+      };
+
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      // Replace old tracks with new ones in peer connection
+      if (peerConnectionRef.current && localStreamRef.current) {
+        // Remove old tracks
+        localStreamRef.current.getTracks().forEach(track => {
+          peerConnectionRef.current.getSenders().forEach(sender => {
+            if (sender.track === track) {
+              peerConnectionRef.current.removeTrack(sender);
+            }
+          });
+          track.stop();
+        });
+        
+        // Add new tracks
+        newStream.getAudioTracks().forEach(track => {
+          peerConnectionRef.current.addTrack(track, newStream);
+          track.onended = () => {
+            console.warn('⚠️ Local audio track ended again, attempting to re-capture...');
+            reCaptureLocalAudio();
+          };
+        });
+        
+        // Update local stream ref
+        localStreamRef.current = newStream;
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = newStream;
+        }
+        
+        // Trigger renegotiation
+        if (peerConnectionRef.current.signalingState === 'stable') {
+          const offer = await peerConnectionRef.current.createOffer();
+          await peerConnectionRef.current.setLocalDescription(offer);
+          
+          const targetUserId = activeCall?.userId;
+          if (targetUserId && socket) {
+            socket.emit('renegotiate', {
+              to: targetUserId,
+              offer: offer
+            });
+            console.log('📤 Sent renegotiation offer for local audio re-capture');
+          }
+        }
+        
+        console.log('✅ Local audio re-captured and added to peer connection');
+      }
+    } catch (error) {
+      console.error('❌ Failed to re-capture local audio:', error);
+      toast.error('Failed to re-capture microphone');
+    }
+  };
+
   // Start call timer
   const startCallTimer = () => {
     if (callTimerRef.current) {
@@ -1202,6 +1339,14 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('🎤 Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('✅ Microphone access granted, stream obtained:', stream);
+      
+      // Monitor local tracks for automatic re-capture if they end
+      stream.getAudioTracks().forEach(track => {
+        track.onended = () => {
+          console.warn('⚠️ Local audio track ended, attempting to re-capture...');
+          reCaptureLocalAudio();
+        };
+      });
       
       localStreamRef.current = stream;
       if (localVideoRef.current) {
@@ -1327,6 +1472,14 @@ export const CallContextProvider = ({ children, socket }) => {
       console.log('🎤 Requesting microphone access to accept call...');
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('✅ Microphone access granted, stream obtained:', stream);
+      
+      // Monitor local tracks for automatic re-capture if they end
+      stream.getAudioTracks().forEach(track => {
+        track.onended = () => {
+          console.warn('⚠️ Local audio track ended, attempting to re-capture...');
+          reCaptureLocalAudio();
+        };
+      });
       
       localStreamRef.current = stream;
       if (localVideoRef.current) {
