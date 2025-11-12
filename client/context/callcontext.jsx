@@ -257,26 +257,49 @@ export const CallContextProvider = ({ children, socket }) => {
 
   // Create peer connection
   const createPeerConnection = () => {
+    console.log('🔧 Creating RTCPeerConnection with configuration:', {
+      iceServers: ICE_SERVERS.iceServers.length,
+      iceCandidatePoolSize: ICE_SERVERS.iceCandidatePoolSize
+    });
+    
     const pc = new RTCPeerConnection(ICE_SERVERS);
     
     // Add local stream tracks
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        console.log('🎤 Adding local track:', track.kind, track.id);
-        pc.addTrack(track, localStreamRef.current);
+      const localStream = localStreamRef.current;
+      localStream.getTracks().forEach(track => {
+        console.log('🎤 Adding local track:', track.kind, track.id, 'enabled:', track.enabled);
+        pc.addTrack(track, localStream);
       });
+      console.log('✅ Local stream tracks added to peer connection');
+    } else {
+      console.warn('⚠️ No local stream available when creating peer connection');
     }
 
     // Handle remote stream
     pc.ontrack = (event) => {
-      console.log('📹 Received remote stream event:', event);
-      console.log('📹 Streams:', event.streams);
-      console.log('📹 Track:', event.track);
+      console.log('📹 Received remote stream event');
+      console.log('📹 Track kind:', event.track.kind);
+      console.log('📹 Track id:', event.track.id);
+      console.log('📹 Track enabled:', event.track.enabled);
+      console.log('📹 Track readyState:', event.track.readyState);
       
       if (event.streams && event.streams.length > 0) {
         const remoteStream = event.streams[0];
         const tracks = remoteStream.getTracks();
-        console.log('📹 Remote stream tracks:', tracks);
+        console.log('📹 Remote stream received with', tracks.length, 'tracks');
+        
+        // Log audio track details
+        tracks.forEach(track => {
+          if (track.kind === 'audio') {
+            console.log('🎵 Remote audio track:', {
+              id: track.id,
+              enabled: track.enabled,
+              muted: track.muted,
+              readyState: track.readyState
+            });
+          }
+        });
         
         // Ensure all tracks are enabled
         tracks.forEach(track => {
@@ -562,12 +585,32 @@ export const CallContextProvider = ({ children, socket }) => {
       if (event.candidate && socket) {
         const targetUserId = activeCall?.userId || incomingCall?.from;
         if (targetUserId) {
-          console.log('🧊 Sending ICE candidate:', {
+          // Parse candidate type from candidate string
+          const candidateStr = event.candidate.candidate;
+          let candidateType = 'unknown';
+          if (candidateStr.includes('typ host')) {
+            candidateType = 'host';
+          } else if (candidateStr.includes('typ srflx')) {
+            candidateType = 'srflx';
+          } else if (candidateStr.includes('typ relay')) {
+            candidateType = 'relay';
+          } else if (candidateStr.includes('typ prflx')) {
+            candidateType = 'prflx';
+          }
+          
+          console.log(`🧊 Sending ICE candidate (type: ${candidateType}):`, {
             to: targetUserId,
-            candidate: event.candidate.candidate,
+            candidate: candidateStr.substring(0, 100) + '...',
             sdpMLineIndex: event.candidate.sdpMLineIndex,
-            sdpMid: event.candidate.sdpMid
+            sdpMid: event.candidate.sdpMid,
+            type: candidateType
           });
+          
+          // Log relay candidates specifically (TURN usage)
+          if (candidateType === 'relay') {
+            console.log('🔹 ICE candidate type: relay (TURN server active)');
+          }
+          
           socket.emit('ice-candidate', {
             to: targetUserId,
             candidate: event.candidate
@@ -607,22 +650,71 @@ export const CallContextProvider = ({ children, socket }) => {
       // Log connection quality
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         console.log('✅ ICE connection established successfully!');
+        console.log('🔌 ICE connection state: connected');
         
-        // Get connection stats
+        // Get detailed connection stats to verify TURN usage
         pc.getStats().then(stats => {
+          let selectedPair = null;
+          let localCandidate = null;
+          let remoteCandidate = null;
+          let usingRelay = false;
+          
           stats.forEach(report => {
+            // Find selected candidate pair
             if (report.type === 'candidate-pair' && report.selected) {
-              console.log('📊 Connection stats:', {
-                localCandidate: report.localCandidateId,
-                remoteCandidate: report.remoteCandidateId,
+              selectedPair = report;
+              console.log('📊 Selected candidate pair:', {
                 state: report.state,
-                priority: report.priority
+                priority: report.priority,
+                bytesReceived: report.bytesReceived,
+                bytesSent: report.bytesSent
               });
             }
+            
+            // Find local candidate details
+            if (report.type === 'local-candidate' && selectedPair && report.id === selectedPair.localCandidateId) {
+              localCandidate = report;
+              console.log('📡 Local candidate:', {
+                type: report.candidateType,
+                ip: report.ip,
+                port: report.port,
+                protocol: report.protocol
+              });
+              if (report.candidateType === 'relay') {
+                usingRelay = true;
+                console.log('🔹 Using TURN relay (local)');
+              }
+            }
+            
+            // Find remote candidate details
+            if (report.type === 'remote-candidate' && selectedPair && report.id === selectedPair.remoteCandidateId) {
+              remoteCandidate = report;
+              console.log('📡 Remote candidate:', {
+                type: report.candidateType,
+                ip: report.ip,
+                port: report.port,
+                protocol: report.protocol
+              });
+              if (report.candidateType === 'relay') {
+                usingRelay = true;
+                console.log('🔹 Using TURN relay (remote)');
+              }
+            }
           });
+          
+          // Summary
+          if (usingRelay) {
+            console.log('✅ Connection using TURN relay - Good for cross-network calls!');
+          } else {
+            console.log('ℹ️ Connection using direct P2P (no TURN relay)');
+          }
         }).catch(err => {
           console.warn('Failed to get stats:', err);
         });
+      } else if (pc.iceConnectionState === 'checking') {
+        console.log('🔄 ICE connection state: checking (gathering candidates...)');
+      } else if (pc.iceConnectionState === 'disconnected') {
+        console.warn('⚠️ ICE connection state: disconnected');
       }
     };
     
@@ -642,22 +734,37 @@ export const CallContextProvider = ({ children, socket }) => {
       
       if (pc.connectionState === 'connected') {
         console.log('✅ Peer connection established!');
+        console.log('🎧 Remote audio should be playing...');
         
         // Log connection details for debugging
         pc.getStats().then(stats => {
           let hasRelay = false;
           let hasHost = false;
+          let hasSrflx = false;
+          
           stats.forEach(report => {
             if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
-              if (report.candidateType === 'relay') hasRelay = true;
+              if (report.candidateType === 'relay') {
+                hasRelay = true;
+                console.log('🔹 ICE candidate type: relay (TURN active)');
+              }
               if (report.candidateType === 'host') hasHost = true;
+              if (report.candidateType === 'srflx') hasSrflx = true;
             }
           });
-          console.log('📊 Connection type:', {
+          
+          console.log('📊 Connection type summary:', {
             usingRelay: hasRelay,
             usingHost: hasHost,
-            note: hasRelay ? 'Using TURN (relay) - good for cross-device' : 'Using direct connection'
+            usingSrflx: hasSrflx,
+            note: hasRelay 
+              ? '✅ Using TURN (relay) - Excellent for cross-network calls!' 
+              : hasSrflx 
+                ? 'ℹ️ Using STUN (srflx) - May work for cross-network'
+                : '⚠️ Using direct connection - May fail across different networks'
           });
+        }).catch(err => {
+          console.warn('Failed to get connection stats:', err);
         });
         
         // When connected, ensure remote audio plays
@@ -665,16 +772,19 @@ export const CallContextProvider = ({ children, socket }) => {
           if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
             remoteVideoRef.current.muted = false;
             remoteVideoRef.current.volume = 1.0;
-            remoteVideoRef.current.play().catch(err => {
+            remoteVideoRef.current.play().then(() => {
+              console.log('🎧 Remote audio playing successfully!');
+            }).catch(err => {
               console.log('Audio play on connection:', err);
             });
           }
         }, 500);
       } else if (pc.connectionState === 'connecting') {
-        console.log('🔄 Connecting...');
+        console.log('🔄 Connection state: connecting (establishing connection...)');
       } else if (pc.connectionState === 'failed') {
+        console.error('❌ Connection state: failed');
         console.error('❌ Connection failed! This may be a NAT/firewall issue.');
-        console.error('💡 Try: 1) Check firewall settings 2) Use TURN server 3) Check network');
+        console.error('💡 Try: 1) Check firewall settings 2) Verify TURN server 3) Check network');
         
         // Try ICE restart before giving up
         setTimeout(() => {
@@ -710,14 +820,17 @@ export const CallContextProvider = ({ children, socket }) => {
           }
         }, 2000);
       } else if (pc.connectionState === 'disconnected') {
-        console.warn('⚠️ Connection disconnected');
+        console.warn('⚠️ Connection state: disconnected');
         // Don't end call immediately - might reconnect
         setTimeout(() => {
           if (peerConnectionRef.current && peerConnectionRef.current.connectionState === 'disconnected') {
+            console.warn('⚠️ Connection remained disconnected, ending call');
             endCall();
             toast.error('Call disconnected');
           }
         }, 5000);
+      } else if (pc.connectionState === 'closed') {
+        console.log('🔌 Connection state: closed');
       }
     };
 
