@@ -12,76 +12,87 @@ const isWebView = window.navigator.standalone ||
 
 export const CallContext = createContext();
 
+// Metered.ca API Key for dynamic TURN credentials
+const METERED_API_KEY = '737289ed2449406c8447cdbfb76f3848d6b6';
+const METERED_API_URL = 'https://hide-in.metered.live/api/v1/turn/credentials';
+
 // STUN servers (for NAT discovery) - Multiple for redundancy
 const STUN_SERVERS = [
+  { urls: 'stun:stun.relay.metered.ca:80' },
   { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' }
+  { urls: 'stun:stun1.l.google.com:19302' }
 ];
 
-// TURN servers (for relay when direct connection fails - essential for cross-network calls)
-// Using multiple free TURN servers for better reliability and fallback
-const TURN_SERVERS = [
-  // OpenRelay (free, open source)
+// Static TURN servers (fallback if API fails)
+// Using your Metered.ca credentials
+const STATIC_TURN_SERVERS = [
   {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
+    urls: 'turn:us-west.relay.metered.ca:80',
+    username: '3bd0a70f90417bcc4c8a9897',
+    credential: 'w/s3uy0+NfQ3rIpc'
   },
   {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
+    urls: 'turn:us-west.relay.metered.ca:80?transport=tcp',
+    username: '3bd0a70f90417bcc4c8a9897',
+    credential: 'w/s3uy0+NfQ3rIpc'
   },
   {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  // Metered.ca free tier (100GB/month free)
-  {
-    urls: 'turn:a.relay.metered.ca:80',
-    username: 'a1b2c3d4e5f6g7h8i9j0',
-    credential: 'a1b2c3d4e5f6g7h8i9j0'
+    urls: 'turn:us-west.relay.metered.ca:443',
+    username: '3bd0a70f90417bcc4c8a9897',
+    credential: 'w/s3uy0+NfQ3rIpc'
   },
   {
-    urls: 'turn:a.relay.metered.ca:443',
-    username: 'a1b2c3d4e5f6g7h8i9j0',
-    credential: 'a1b2c3d4e5f6g7h8i9j0'
-  },
-  {
-    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
-    username: 'a1b2c3d4e5f6g7h8i9j0',
-    credential: 'a1b2c3d4e5f6g7h8i9j0'
-  },
-  // Xirsys public TURN (free tier)
-  {
-    urls: 'turn:open.xirsys.com:80?transport=udp',
-    username: 'open',
-    credential: 'open'
-  },
-  {
-    urls: 'turn:open.xirsys.com:3478?transport=udp',
-    username: 'open',
-    credential: 'open'
-  },
-  {
-    urls: 'turn:open.xirsys.com:80?transport=tcp',
-    username: 'open',
-    credential: 'open'
+    urls: 'turns:us-west.relay.metered.ca:443?transport=tcp',
+    username: '3bd0a70f90417bcc4c8a9897',
+    credential: 'w/s3uy0+NfQ3rIpc'
   }
 ];
 
-// WebRTC ICE configuration with STUN + TURN for full cross-network support
-const ICE_SERVERS = {
+// Function to fetch dynamic TURN credentials from Metered.ca API
+const fetchTurnCredentials = async () => {
+  try {
+    console.log('🔄 Fetching TURN credentials from Metered.ca API...');
+    const response = await fetch(`${METERED_API_URL}?apiKey=${METERED_API_KEY}`);
+    
+    if (!response.ok) {
+      throw new Error(`API request failed: ${response.status}`);
+    }
+    
+    const iceServers = await response.json();
+    console.log('✅ TURN credentials fetched successfully');
+    return iceServers;
+  } catch (error) {
+    console.warn('⚠️ Failed to fetch TURN credentials from API, using static credentials:', error);
+    return null;
+  }
+};
+
+// Initialize ICE servers with static credentials (will be updated with dynamic if available)
+let ICE_SERVERS = {
   iceServers: [
     ...STUN_SERVERS,
-    ...TURN_SERVERS
+    ...STATIC_TURN_SERVERS
   ],
-  iceCandidatePoolSize: 10 // Pre-gather more candidates for better connectivity
+  iceCandidatePoolSize: 10
 };
+
+// Fetch dynamic credentials on initialization (non-blocking)
+fetchTurnCredentials().then(dynamicServers => {
+  if (dynamicServers && Array.isArray(dynamicServers)) {
+    console.log('✅ Using dynamic TURN credentials from API');
+    ICE_SERVERS = {
+      iceServers: [
+        ...STUN_SERVERS,
+        ...dynamicServers
+      ],
+      iceCandidatePoolSize: 10
+    };
+  } else {
+    console.log('ℹ️ Using static TURN credentials');
+  }
+}).catch(err => {
+  console.warn('⚠️ Using static TURN credentials as fallback');
+});
 
 export const CallContextProvider = ({ children, socket }) => {
   const [incomingCall, setIncomingCall] = useState(null);
@@ -383,13 +394,32 @@ export const CallContextProvider = ({ children, socket }) => {
   }, [socket]);
 
   // Create peer connection
-  const createPeerConnection = () => {
+  const createPeerConnection = async () => {
+    // Try to get fresh TURN credentials if available
+    let iceConfig = ICE_SERVERS;
+    try {
+      const dynamicServers = await fetchTurnCredentials();
+      if (dynamicServers && Array.isArray(dynamicServers)) {
+        iceConfig = {
+          iceServers: [
+            ...STUN_SERVERS,
+            ...dynamicServers
+          ],
+          iceCandidatePoolSize: 10
+        };
+        console.log('✅ Using fresh TURN credentials from API');
+      }
+    } catch (err) {
+      console.log('ℹ️ Using cached TURN credentials');
+    }
+    
     console.log('🔧 Creating RTCPeerConnection with configuration:', {
-      iceServers: ICE_SERVERS.iceServers.length,
-      iceCandidatePoolSize: ICE_SERVERS.iceCandidatePoolSize
+      iceServers: iceConfig.iceServers.length,
+      iceCandidatePoolSize: iceConfig.iceCandidatePoolSize,
+      turnServers: iceConfig.iceServers.filter(s => s.urls.includes('turn:')).length
     });
     
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(iceConfig);
     
     // Add local stream tracks
     if (localStreamRef.current) {
@@ -1397,7 +1427,7 @@ export const CallContextProvider = ({ children, socket }) => {
       }
 
       // Create peer connection
-      const pc = createPeerConnection();
+      const pc = await createPeerConnection();
 
       // Create offer with better configuration for cross-device
       const offerOptions = {
@@ -1530,7 +1560,7 @@ export const CallContextProvider = ({ children, socket }) => {
       }
 
       // Create peer connection
-      const pc = createPeerConnection();
+      const pc = await createPeerConnection();
 
       // Set remote description from offer
       if (incomingCall.offer) {
