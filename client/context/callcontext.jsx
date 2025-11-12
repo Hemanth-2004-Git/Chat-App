@@ -587,9 +587,21 @@ export const CallContextProvider = ({ children, socket }) => {
       // If connection fails, try to restart ICE
       if (pc.iceConnectionState === 'failed') {
         console.warn('⚠️ ICE connection failed, attempting ICE restart...');
-        pc.restartIce().catch(err => {
-          console.error('Failed to restart ICE:', err);
-        });
+        try {
+          // Check if restartIce is available and returns a Promise
+          if (pc.restartIce && typeof pc.restartIce === 'function') {
+            const restartPromise = pc.restartIce();
+            if (restartPromise && typeof restartPromise.catch === 'function') {
+              restartPromise.catch(err => {
+                console.error('Failed to restart ICE:', err);
+              });
+            }
+          } else {
+            console.warn('⚠️ restartIce() not available in this browser');
+          }
+        } catch (err) {
+          console.error('Error calling restartIce:', err);
+        }
       }
       
       // Log connection quality
@@ -668,11 +680,33 @@ export const CallContextProvider = ({ children, socket }) => {
         setTimeout(() => {
           if (peerConnectionRef.current && peerConnectionRef.current.connectionState === 'failed') {
             console.log('🔄 Attempting ICE restart...');
-            peerConnectionRef.current.restartIce().catch(err => {
-              console.error('ICE restart failed:', err);
+            try {
+              const pc = peerConnectionRef.current;
+              // Check if restartIce is available and returns a Promise
+              if (pc.restartIce && typeof pc.restartIce === 'function') {
+                const restartPromise = pc.restartIce();
+                if (restartPromise && typeof restartPromise.catch === 'function') {
+                  restartPromise.catch(err => {
+                    console.error('ICE restart failed:', err);
+                    endCall();
+                    toast.error('Call failed - Check network connection');
+                  });
+                } else {
+                  // restartIce didn't return a Promise, handle gracefully
+                  console.warn('⚠️ restartIce() did not return a Promise');
+                  endCall();
+                  toast.error('Call failed - Check network connection');
+                }
+              } else {
+                console.warn('⚠️ restartIce() not available in this browser');
+                endCall();
+                toast.error('Call failed - Check network connection');
+              }
+            } catch (err) {
+              console.error('Error calling restartIce:', err);
               endCall();
               toast.error('Call failed - Check network connection');
-            });
+            }
           }
         }, 2000);
       } else if (pc.connectionState === 'disconnected') {
